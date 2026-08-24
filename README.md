@@ -8,270 +8,349 @@ always returns a **probability**, a **confidence score**, and
 ```
 Chrome/Edge Extension  ──┐
                           ├──▶  FastAPI Backend ──▶ Detector Registry ──▶ Score Fusion ──▶ JSON
-React Dashboard (demo) ──┘                          (image + video)
+React Dashboard (demo) ──┘                          (image + video + audio)
 ```
 
-## Repository layout
-
-```
-social-detect/
-├── backend/      FastAPI service: modular detectors, ensemble fusion, REST API
-├── dashboard/    React + Tailwind demo/testing UI (same backend as the extension)
-├── extension/    Manifest V3 Chrome/Edge extension (Instagram first)
-└── docker-compose.yml
-```
-
-## Design principle: no verdicts
-
-Every response — from the API, the dashboard, and the extension overlay —
-carries the same disclaimer baked into the schema itself
-(`AnalysisResponse.disclaimer`): this is a probabilistic estimate, not proof.
-Classification labels are deliberately hedged (`Likely AI Generated`,
-`Possibly Manipulated`, `Likely Authentic`, `Inconclusive`), and confidence
-is computed independently from probability so the system can say "I don't
-know" instead of forcing a lopsided guess into false certainty.
+**Supported extension sites:** Instagram · YouTube (watch + Shorts)
 
 ---
 
-## 1. Backend (`/backend`)
+## Setup & Installation
 
-FastAPI service exposing:
+### Prerequisites
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /analyze/image` | multipart image upload |
-| `POST /analyze/video` | multipart video upload — frames cut + scored as images; audio extracted and scored in parallel |
-| `POST /analyze/media` | multipart upload with **auto image/video detection** (magic bytes / content-type / filename) |
-| `POST /analyze/frames` | multipart sequence of JPEG frames (extension fallback when only canvas snapshots are available) |
-| `POST /analyze/url` | JSON `{ url, platform_hint? }` — direct media URL (auto-detects kind) |
-| `GET /status` | health check + which detectors are currently active |
+| Tool | Windows | Linux |
+|------|---------|-------|
+| Git | [git-scm.com](https://git-scm.com/download/win) | `sudo apt install git` |
+| Python 3.11+ | [python.org](https://www.python.org/downloads/) (tick **Add to PATH**) | `sudo apt install python3 python3-venv python3-pip` |
+| Node.js 18+ | [nodejs.org](https://nodejs.org/) | [NodeSource](https://github.com/nodesource/distributions) or `sudo apt install nodejs npm` |
+| FFmpeg | `winget install Gyan.FFmpeg` | `sudo apt install ffmpeg` |
+| Chrome or Edge | — | — |
 
-### Modular detector architecture
+Optional (GPU training / MFAD-Net): NVIDIA driver + CUDA-enabled PyTorch.
 
-Every detector implements `app/detectors/base.py::BaseDetector` and is
-registered in **one place**, `app/detectors/registry.py`. Detectors are
-lazy-loaded, never raise (failures degrade to a neutral, zero-confidence
-result instead of a 500), and self-report `available` so optional heavy
-dependencies (torch/transformers) can be absent without breaking the API.
+Verify tools:
 
-Shipped out of the box (dependency-light, no downloaded weights required):
+**Windows (PowerShell)**
+```powershell
+git --version
+py -3.12 --version
+node --version
+npm --version
+ffmpeg -version
+```
 
-- **`frequency_artifact_fft`** — 2D FFT spectral analysis; flags periodic
-  grid artifacts and unnatural high-frequency roll-off typical of GAN/
-  diffusion up-sampling.
-- **`sensor_noise_residual`** — high-pass noise-residual analysis; flags
-  images missing the camera sensor noise floor real photos have.
-- **`compression_ela`** — Error Level Analysis; flags flat/uniform
-  compression history (fresh AI export) or localized inpainting.
-- **`metadata_inspection`** — EXIF inspection; flags known AI-tool
-  signatures in the `Software` field, rewards genuine camera make/model.
-- **`temporal_consistency`** (video) — frame-to-frame flicker analysis.
-- **`synthetic_speech_audio`** (video soundtrack) — extracts audio via ffmpeg
-  and scores TTS/vocoder-like cues (spectral flatness, pitch stability, silence
-  floor) **in parallel** with the visual/frame pipeline.
-- **`clip_semantic_probe`** — wired up but intentionally inert until a
-  trained real-vs-AI probe head is attached (see below); demonstrates how
-  to slot in CLIP/ViT/UniversalFakeDetect-style learned classifiers.
+**Linux (bash)**
+```bash
+git --version
+python3 --version
+node --version
+npm --version
+ffmpeg -version
+```
 
-### Adding a real trained model
+---
 
-1. Create `app/detectors/image/my_model.py` (or `detectors/video/`)
-   implementing `BaseDetector`.
-2. Load weights lazily inside `load()`; set `available` to reflect whether
-   deps/weights are actually present.
-3. Add an instance to `IMAGE_DETECTORS` / `VIDEO_DETECTORS` in
-   `app/detectors/registry.py`. Nothing else changes — the API, fusion
-   logic, dashboard, and extension all consume detectors polymorphically.
+### 1. Clone the repository
 
-**MFAD-Net** (paper architecture) is already wired as detector `mfad_net`:
-EfficientNet+FFT visual branch, Wav2Vec2+MFCC audio branch, GAT metadata,
-CMAF transformer fusion, and TSDD drift detection. Train with:
+**Windows (PowerShell)**
+```powershell
+git clone https://github.com/abhilashreddydereddy/social-detect.git
+cd social-detect
+git checkout main
+git pull origin main
+```
+
+**Linux (bash)**
+```bash
+git clone https://github.com/abhilashreddydereddy/social-detect.git
+cd social-detect
+git checkout main
+git pull origin main
+```
+
+---
+
+### 2. Backend (API on port 8000)
+
+Keep this terminal open while using the dashboard or extension.
+
+#### Windows (PowerShell)
+
+```powershell
+cd backend
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Heuristic detectors only (fast, recommended first run):
+pip install -r requirements-lite.txt
+
+# OR full stack (Torch / transformers / MFAD support):
+# pip install -r requirements.txt
+# For NVIDIA GPU Torch instead of CPU:
+# pip uninstall -y torch torchvision torchaudio
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+If PowerShell blocks activation:
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+#### Linux (bash)
 
 ```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Heuristic detectors only (fast, recommended first run):
+pip install -r requirements-lite.txt
+
+# OR full stack (Torch / transformers / MFAD support):
+# pip install -r requirements.txt
+# For NVIDIA GPU Torch:
+# pip uninstall -y torch torchvision torchaudio
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+#### Verify backend
+
+Open:
+
+- API docs: http://localhost:8000/docs  
+- Health: http://localhost:8000/status  
+
+You should see `"status": "ok"` and a list of detectors.
+
+---
+
+### 3. Dashboard (optional demo UI on port 5173)
+
+Open a **second** terminal.
+
+#### Windows (PowerShell)
+
+```powershell
+cd social-detect\dashboard
+npm install
+npm run dev
+```
+
+#### Linux (bash)
+
+```bash
+cd social-detect/dashboard
+npm install
+npm run dev
+```
+
+Open http://localhost:5173  
+
+Override API URL if needed:
+```powershell
+# Windows
+$env:VITE_API_BASE_URL="http://localhost:8000"
+npm run dev
+```
+```bash
+# Linux
+VITE_API_BASE_URL=http://localhost:8000 npm run dev
+```
+
+---
+
+### 4. Browser extension (primary product)
+
+The extension captures pixels from Instagram/YouTube in the page and uploads
+them to your local backend (`POST /analyze/image`). CDN URLs are **not**
+sent to the server (they are usually blocked).
+
+1. Start the **backend** (step 2) and leave it running.
+2. Open Chrome/Edge → `chrome://extensions` (or `edge://extensions`).
+3. Enable **Developer mode**.
+4. Click **Load unpacked**.
+5. Select the `social-detect/extension` folder (the folder that contains `manifest.json`).
+6. Confirm the extension version in the card (current: **0.3.0**).
+7. Click the extension icon → Backend URL = `http://localhost:8000` → detectors should show online.
+8. Open Instagram or a YouTube `/watch` / Shorts page → click **🔍 Analyze** on the media.
+
+If YouTube shows no button: open a watch page, click the extension popup → **Inject on this tab**.
+
+After `git pull`, always **Remove** the extension and **Load unpacked** again so new permissions/scripts apply.
+
+---
+
+### 5. Quick end-to-end check
+
+| Step | Expected |
+|------|----------|
+| http://localhost:8000/status | `"status": "ok"` |
+| http://localhost:5173 | Dashboard loads |
+| Extension popup | Detectors online |
+| Instagram / YouTube Analyze | Overlay with probability + evidence |
+
+DevTools console on the social page should log something like:
+```text
+[Social Detect] sending to backend: { kind: "frame", method: "canvas"|"fetch"|"viewport", ... }
+```
+
+---
+
+### 6. Optional — MFAD-Net training
+
+Smoke train (CPU or GPU) from the **repo root** (not inside `training/`):
+
+#### Windows (PowerShell)
+
+```powershell
+cd social-detect
+py -3.12 -m venv training\.venv
+.\training\.venv\Scripts\Activate.ps1
+pip install -r training\requirements.txt
+
+# GPU (optional):
+# pip uninstall -y torch torchvision torchaudio
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+python -m training.mfad_net.scripts.train --config training/mfad_net/configs/smoke.yaml
+copy training\exports\mfad_net\mfad_net_best.pth backend\models\mfad_net\
+```
+
+#### Linux (bash)
+
+```bash
+cd social-detect
+python3 -m venv training/.venv
+source training/.venv/bin/activate
 pip install -r training/requirements.txt
+
+# GPU (optional):
+# pip uninstall -y torch torchvision torchaudio
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
 python -m training.mfad_net.scripts.train --config training/mfad_net/configs/smoke.yaml
 cp training/exports/mfad_net/mfad_net_best.pth backend/models/mfad_net/
 ```
 
-See `training/mfad_net/README.md` for full-dataset training
-(FaceForensics++ / DFDC / WildDeepfake).
-
-### Score fusion (`app/core/fusion.py`)
-
-Confidence-weighted average (not majority vote), with an **agreement
-bonus**: detectors that agree with each other push confidence up, and
-disagreement pulls it down — correlated independent signals are stronger
-evidence than any single loud detector. Failed detectors are excluded from
-fusion entirely rather than counted as neutral.
-
-### Running locally
-
+Confirm GPU:
 ```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-
-# Heuristic detectors only (fast, no torch/transformers):
-pip install -r requirements-lite.txt
-
-# Full stack incl. optional CLIP slot + GPU support:
-pip install -r requirements.txt
-
-# ffmpeg/ffprobe are required for video (system package, not pip):
-#   macOS:  brew install ffmpeg
-#   Ubuntu: sudo apt install ffmpeg
-
-uvicorn app.main:app --reload
-# -> http://localhost:8000/docs
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu')"
 ```
 
-Run tests: `pytest tests/ -v` (validated — 4/4 passing against the
-heuristic detector stack, including a synthetic-image round trip through
-the full pipeline).
+Force CUDA in config: set `device: cuda` in `training/mfad_net/configs/smoke.yaml`.
 
-### Docker
+Restart the backend after copying weights. Full-dataset training (FF++ / DFDC / WildDeepfake): see `training/mfad_net/README.md`.
+
+> The committed / smoke checkpoint validates the architecture. For real deepfake accuracy, train on the paper datasets with `full.yaml` on GPU.
+
+---
+
+### 7. Optional — Docker
+
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Windows) or Docker Engine (Linux).
 
 ```bash
 docker compose up --build
 ```
 
-Starts Postgres, Redis, the backend (port 8000), and the dashboard (port
-5173). GPU inference: uncomment the `deploy.resources.reservations.devices`
-block in `docker-compose.yml` (requires the NVIDIA Container Toolkit) and
-swap the backend's base image for a CUDA runtime image.
+- Backend: http://localhost:8000  
+- Dashboard: http://localhost:5173  
 
 ---
 
-## 2. React Dashboard (`/dashboard`)
+## Repository layout
 
-Vite + React + Tailwind. Three input modes (upload image, upload video,
-paste a direct media URL) against the same backend the extension uses —
-built for demos, debugging, and visually comparing detector output.
-Includes a per-detector comparison table, evidence list, and a
-frame-by-frame timeline for video (thumbnail + per-frame AI-probability
-strip, seismograph-style).
+```
+social-detect/
+├── backend/      FastAPI: detectors, fusion, REST API
+├── dashboard/    React + Tailwind demo UI
+├── extension/    Manifest V3 Chrome/Edge extension (Instagram + YouTube)
+├── training/     MFAD-Net and other training code
+└── docker-compose.yml
+```
+
+## Design principle: no verdicts
+
+Every response carries a disclaimer (`AnalysisResponse.disclaimer`): this is a
+probabilistic estimate, not proof. Labels are hedged (`Likely AI Generated`,
+`Possibly Manipulated`, `Likely Authentic`, `Inconclusive`).
+
+---
+
+## Backend API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /analyze/image` | multipart image upload |
+| `POST /analyze/video` | video → frames as images + parallel audio scoring |
+| `POST /analyze/media` | auto image/video detection |
+| `POST /analyze/frames` | multipart JPEG frame sequence |
+| `POST /analyze/url` | direct media URL (best-effort) |
+| `GET /status` | health + active detectors |
+
+### Detectors (registry)
+
+Heuristic (no weights required): frequency FFT, noise residual, compression ELA,
+metadata, temporal consistency, synthetic speech audio.
+
+Learned / optional: `mfad_net` (loads `backend/models/mfad_net/mfad_net_best.pth`
+when present), `clip_semantic_probe`.
+
+Add a model: implement `BaseDetector`, register in `app/detectors/registry.py`.
+
+### Tests
 
 ```bash
-cd dashboard
-npm install
-npm run dev
-# -> http://localhost:5173, expects backend at http://localhost:8000
-#    (override with VITE_API_BASE_URL)
+# from backend/ with venv active
+cd backend
+pytest tests/ -v
+# if needed: PYTHONPATH=. pytest tests/ -v
 ```
-
-Verified: `npm run build` completes cleanly (production bundle, 158KB JS /
-14KB CSS gzip-friendly).
 
 ---
 
-## 3. Browser Extension (`/extension`) — the primary product
+## Extension — how media is extracted
 
-Manifest V3. Supports **Instagram** and **YouTube** (watch pages + Shorts).
-Injects a small "🔍 Analyze" control into the corner of each detected post;
-clicking it messages the background service worker, which calls the backend
-and returns probability/confidence/evidence rendered in a compact Shadow-DOM
-overlay (fully style-isolated from the host page).
+1. **Canvas** — draw the visible `<img>` / `<video>`  
+2. **Page fetch** — download the media URL in-page (cookies/referrer)  
+3. **Viewport crop** — `captureVisibleTab` + crop to the element  
 
-### Load unpacked (local dev)
-
-1. `chrome://extensions` (or `edge://extensions`) → enable **Developer mode**.
-2. **Load unpacked** → select the `extension/` folder.
-3. Click the extension icon → confirm the backend URL (default
-   `http://localhost:8000`) and that detectors show "online".
-4. Visit instagram.com or youtube.com — an "🔍 Analyze" button appears on
-   detected media.
-
-### How media is obtained
-
-- **Images**: the rendered `<img>`'s resolved URL is sent to
-  `POST /analyze/url`; the backend downloads and analyzes it server-side.
-- **Video (direct URL)**: same as above — backend auto-detects video, cuts
-  frames, and scores audio in parallel.
-- **Video (MSE / blob:, e.g. YouTube)**: the adapter prefers
-  `captureStream()` + MediaRecorder for a short clip (video+audio) posted to
-  `/analyze/video`. If recording is blocked, it seeks across the timeline,
-  captures multiple canvas frames, and posts them to `/analyze/frames`
-  (visual pipeline; no audio).
-
-### Adding a new platform (roadmap step 6)
-
-Each platform is a small, self-contained adapter
-(`content_scripts/platforms/<name>.js`) implementing:
-
-```js
-{
-  name: "platform_id",
-  postSelector: "css selector matching each post container",
-  findMediaElement(postEl) { /* return the <img>/<video> to analyze */ },
-  async extractMedia(mediaEl) { /* return { kind: "url"|"frame"|"clip"|"frames", ... } */ },
-}
-```
-
-Stub adapters with selector notes and TODOs already exist for **X**,
-**Reddit**, **Facebook**, and **TikTok** in `content_scripts/platforms/`.
-Activating one is: fill in the selectors, then add a `content_scripts`
-block to `manifest.json` (exact snippet is in each stub's file header
-comment).
+Captured JPEG → `POST /analyze/image` on your local backend.
 
 ---
 
 ## Development roadmap
 
-1. ✅ FastAPI backend scaffold with dummy responses
-2. ✅ Real (heuristic) image detectors — frequency, noise, compression, metadata
-3. ✅ React dashboard
-4. ✅ Chrome extension, Instagram first
-5. ✅ Video analysis + frame-by-frame breakdown, temporal-consistency detector
-6. ✅ YouTube extension support + auto image/video detection + parallel audio authenticity
-7. ⬜ Expand remaining platforms (X, Reddit, Facebook, TikTok) — adapters stubbed
-8. ⬜ Deeper explainability: saliency/heatmap overlays on the image itself,
-   persisted detector-vs-detector comparison dashboards, full analysis
-   history browsing (the DB schema and `/status` groundwork are already in
-   place — `AnalysisRecord` + `active_*_detectors()`)
-9. ⬜ Swap in trained models (UniversalFakeDetect / DIRE / XceptionNet /
-   FaceForensics++ / VideoMAE) behind the existing `clip_semantic_probe`
-   and `temporal_consistency` extension points
-   (and a learned audio classifier behind `synthetic_speech_audio`)
+1. ✅ FastAPI backend scaffold  
+2. ✅ Heuristic image detectors  
+3. ✅ React dashboard  
+4. ✅ Chrome extension (Instagram + YouTube)  
+5. ✅ Video frames + temporal detector + parallel audio  
+6. ✅ Auto media detection + pixel extraction for extension  
+7. ✅ MFAD-Net architecture + smoke training path  
+8. ⬜ Remaining platforms (X, Reddit, Facebook, TikTok)  
+9. ⬜ Full-dataset MFAD training + GradCAM/LIME explainability UI  
 
 ## Tech stack
 
-FastAPI · PyTorch (optional) · Hugging Face Transformers (optional) ·
-OpenCV · FFmpeg · PostgreSQL · Redis (optional) · Docker · React · Vite ·
-Tailwind CSS · Manifest V3
+FastAPI · PyTorch (optional) · Transformers (optional) · OpenCV · FFmpeg ·
+PostgreSQL · Redis (optional) · Docker · React · Vite · Tailwind · MV3
 
 ---
 
-## 4. Training workspace (`/training`)
+## Troubleshooting
 
-Use `training/` for dataset prep, branch training, fusion training, and
-artifact export. Keep the live API under `backend/` inference-only.
-
-### Workflow
-
-1. Prepare manifests under `training/data/`
-2. Train the image branch first
-3. Export branch predictions on a validation set
-4. Train the fusion model on those features
-5. Train the video branch after the image path is stable
-6. Copy validated artifacts into `backend/models/` and point config/env vars
-   at them
-
-### Starter files
-
-- `training/image_branch/configs/baseline.yaml`
-- `training/image_branch/scripts/prepare_manifest.py`
-- `training/image_branch/scripts/train_stub.py`
-- `training/video_branch/configs/baseline.yaml`
-- `training/video_branch/scripts/train_stub.py`
-- `training/fusion/configs/baseline.yaml`
-- `training/fusion/scripts/train_fusion.py`
-
-### Backend artifact paths
-
-The backend now exposes config hooks for:
-
-- `SOCIAL_DETECT_IMAGE_MODEL_CHECKPOINT_PATH`
-- `SOCIAL_DETECT_VIDEO_MODEL_CHECKPOINT_PATH`
-- `SOCIAL_DETECT_FUSION_MODEL_PATH`
-
-Point these at files under `backend/models/` once you have trained exports
-ready.
+| Problem | Fix |
+|---------|-----|
+| `ModuleNotFoundError: training` | Run train commands from **repo root**, not `training/` |
+| Extension still old version | Remove extension → Load unpacked again after `git pull` |
+| Backend unreachable in popup | Start uvicorn; URL must be `http://localhost:8000` |
+| Analyze fails / no pixels | Wait for media to load; check console for `[Social Detect] sending to backend` |
+| `torch.cuda.is_available() == False` | Install CUDA wheel (`cu124` / `cu121`), not the default CPU build |
+| Video/audio path errors | Install system `ffmpeg` / `ffprobe` and restart backend |
+| PowerShell `Activate.ps1` blocked | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
