@@ -48,12 +48,31 @@ def ensure_synthetic(config: dict) -> None:
     syn = config.get("synthetic") or {}
     if not syn.get("enabled", False):
         return
-    train_m = Path(config["data"]["train_manifest"])
-    if train_m.exists():
-        return
-    from training.mfad_net.scripts.prepare_synthetic import generate_split
 
     processed = Path(config["data"]["processed_dir"])
+    train_m = Path(config["data"]["train_manifest"])
+    # CSVs may be committed while processed crops are gitignored — regenerate
+    # whenever the first train sample directory has no frames.
+    needs_build = not train_m.exists()
+    if not needs_build:
+        try:
+            import pandas as pd
+
+            df = pd.read_csv(train_m)
+            if df.empty:
+                needs_build = True
+            else:
+                sample_dir = Path(df.iloc[0]["path"])
+                needs_build = not sample_dir.exists() or not any(sample_dir.glob("frame_*.jpg"))
+        except Exception:
+            needs_build = True
+
+    if not needs_build:
+        return
+
+    from training.mfad_net.scripts.prepare_synthetic import generate_split
+
+    print(f"Generating synthetic MFAD-Net dataset under {processed} …")
     frames = int(config.get("frames_per_clip", 4))
     seed = int(config.get("seed", 42))
     generate_split(processed, "train", int(syn.get("n_train", 256)), frames, seed)
