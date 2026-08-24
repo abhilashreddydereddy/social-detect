@@ -40,8 +40,10 @@ FastAPI service exposing:
 | Endpoint | Purpose |
 |---|---|
 | `POST /analyze/image` | multipart image upload |
-| `POST /analyze/video` | multipart video upload |
-| `POST /analyze/url` | JSON `{ url, platform_hint? }` — direct media URL |
+| `POST /analyze/video` | multipart video upload — frames cut + scored as images; audio extracted and scored in parallel |
+| `POST /analyze/media` | multipart upload with **auto image/video detection** (magic bytes / content-type / filename) |
+| `POST /analyze/frames` | multipart sequence of JPEG frames (extension fallback when only canvas snapshots are available) |
+| `POST /analyze/url` | JSON `{ url, platform_hint? }` — direct media URL (auto-detects kind) |
 | `GET /status` | health check + which detectors are currently active |
 
 ### Modular detector architecture
@@ -64,6 +66,9 @@ Shipped out of the box (dependency-light, no downloaded weights required):
 - **`metadata_inspection`** — EXIF inspection; flags known AI-tool
   signatures in the `Software` field, rewards genuine camera make/model.
 - **`temporal_consistency`** (video) — frame-to-frame flicker analysis.
+- **`synthetic_speech_audio`** (video soundtrack) — extracts audio via ffmpeg
+  and scores TTS/vocoder-like cues (spectral flatness, pitch stability, silence
+  floor) **in parallel** with the visual/frame pipeline.
 - **`clip_semantic_probe`** — wired up but intentionally inert until a
   trained real-vs-AI probe head is attached (see below); demonstrates how
   to slot in CLIP/ViT/UniversalFakeDetect-style learned classifiers.
@@ -152,11 +157,11 @@ Verified: `npm run build` completes cleanly (production bundle, 158KB JS /
 
 ## 3. Browser Extension (`/extension`) — the primary product
 
-Manifest V3, Instagram-first. Injects a small "🔍 Analyze" control into the
-corner of each detected post; clicking it messages the background service
-worker, which calls the backend and returns probability/confidence/evidence
-rendered in a compact Shadow-DOM overlay (fully style-isolated from the
-host page — Instagram's CSS can't leak in, and vice versa).
+Manifest V3. Supports **Instagram** and **YouTube** (watch pages + Shorts).
+Injects a small "🔍 Analyze" control into the corner of each detected post;
+clicking it messages the background service worker, which calls the backend
+and returns probability/confidence/evidence rendered in a compact Shadow-DOM
+overlay (fully style-isolated from the host page).
 
 ### Load unpacked (local dev)
 
@@ -164,19 +169,20 @@ host page — Instagram's CSS can't leak in, and vice versa).
 2. **Load unpacked** → select the `extension/` folder.
 3. Click the extension icon → confirm the backend URL (default
    `http://localhost:8000`) and that detectors show "online".
-4. Visit instagram.com, open a post — an "🔍 Analyze" button appears in
-   the top-right corner of the media.
+4. Visit instagram.com or youtube.com — an "🔍 Analyze" button appears on
+   detected media.
 
 ### How media is obtained
 
 - **Images**: the rendered `<img>`'s resolved URL is sent to
   `POST /analyze/url`; the backend downloads and analyzes it server-side.
-- **Video**: if the platform serves a direct video URL, same as above. Many
-  platforms (Instagram, TikTok, YouTube) stream video via Media Source
-  Extensions, where `video.src` is an in-page-only `blob:` URL that can't
-  be downloaded server-side — in that case the content script captures the
-  *currently visible frame* via `<canvas>` and sends it as a single-frame
-  image analysis instead (see `platforms/instagram.js`).
+- **Video (direct URL)**: same as above — backend auto-detects video, cuts
+  frames, and scores audio in parallel.
+- **Video (MSE / blob:, e.g. YouTube)**: the adapter prefers
+  `captureStream()` + MediaRecorder for a short clip (video+audio) posted to
+  `/analyze/video`. If recording is blocked, it seeks across the timeline,
+  captures multiple canvas frames, and posts them to `/analyze/frames`
+  (visual pipeline; no audio).
 
 ### Adding a new platform (roadmap step 6)
 
@@ -188,15 +194,15 @@ Each platform is a small, self-contained adapter
   name: "platform_id",
   postSelector: "css selector matching each post container",
   findMediaElement(postEl) { /* return the <img>/<video> to analyze */ },
-  async extractMedia(mediaEl) { /* return { kind: "url"|"frame", ... } */ },
+  async extractMedia(mediaEl) { /* return { kind: "url"|"frame"|"clip"|"frames", ... } */ },
 }
 ```
 
 Stub adapters with selector notes and TODOs already exist for **X**,
-**Reddit**, **Facebook**, **TikTok**, and **YouTube** in
-`content_scripts/platforms/`. Activating one is: fill in the selectors,
-then add a `content_scripts` block to `manifest.json` (exact snippet is in
-each stub's file header comment).
+**Reddit**, **Facebook**, and **TikTok** in `content_scripts/platforms/`.
+Activating one is: fill in the selectors, then add a `content_scripts`
+block to `manifest.json` (exact snippet is in each stub's file header
+comment).
 
 ---
 
@@ -207,15 +213,16 @@ each stub's file header comment).
 3. ✅ React dashboard
 4. ✅ Chrome extension, Instagram first
 5. ✅ Video analysis + frame-by-frame breakdown, temporal-consistency detector
-6. ⬜ Expand platform support (X, Reddit, Facebook, TikTok, YouTube) — adapters
-   stubbed, see above
-7. ⬜ Deeper explainability: saliency/heatmap overlays on the image itself,
+6. ✅ YouTube extension support + auto image/video detection + parallel audio authenticity
+7. ⬜ Expand remaining platforms (X, Reddit, Facebook, TikTok) — adapters stubbed
+8. ⬜ Deeper explainability: saliency/heatmap overlays on the image itself,
    persisted detector-vs-detector comparison dashboards, full analysis
    history browsing (the DB schema and `/status` groundwork are already in
    place — `AnalysisRecord` + `active_*_detectors()`)
-8. ⬜ Swap in trained models (UniversalFakeDetect / DIRE / XceptionNet /
+9. ⬜ Swap in trained models (UniversalFakeDetect / DIRE / XceptionNet /
    FaceForensics++ / VideoMAE) behind the existing `clip_semantic_probe`
    and `temporal_consistency` extension points
+   (and a learned audio classifier behind `synthetic_speech_audio`)
 
 ## Tech stack
 

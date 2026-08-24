@@ -11,9 +11,13 @@
  *   ANALYZE_DATA_URL    { dataUrl, mediaKind, sourceUrl, platform }
  *                                                -> decodes a data: URL
  *                                                   (captured video frame or
- *                                                   fetched blob) and POSTs
+ *                                                   recorded clip) and POSTs
  *                                                   multipart to
- *                                                   /analyze/image
+ *                                                   /analyze/image|/video|/media
+ *   ANALYZE_FRAMES      { frames[], timestamps?, sourceUrl, platform }
+ *                                                -> POSTs JPEG frames to
+ *                                                   /analyze/frames (visual
+ *                                                   pipeline; no audio)
  *   GET_STATUS          {}                       -> GET /status
  */
 
@@ -33,11 +37,44 @@ async function analyzeDataUrl(dataUrl, mediaKind, sourceUrl) {
   const { backendUrl } = await getSettings();
   const blob = await (await fetch(dataUrl)).blob();
   const form = new FormData();
-  const filename = mediaKind === "video" ? "clip.mp4" : "frame.jpg";
-  form.append("file", blob, filename);
 
-  const endpoint = mediaKind === "video" ? "/analyze/video" : "/analyze/image";
+  let endpoint = "/analyze/media";
+  let filename = "media.bin";
+  if (mediaKind === "video") {
+    endpoint = "/analyze/video";
+    filename = blob.type.includes("mp4") ? "clip.mp4" : "clip.webm";
+  } else if (mediaKind === "image") {
+    endpoint = "/analyze/image";
+    filename = "frame.jpg";
+  }
+
+  form.append("file", blob, filename);
   const resp = await fetch(`${backendUrl}${endpoint}`, { method: "POST", body: form });
+  return finish(resp);
+}
+
+async function analyzeFrames(frames, timestamps, sourceUrl, platform) {
+  if (!frames || !frames.length) {
+    return { ok: false, error: "No frames to analyze" };
+  }
+
+  const { backendUrl } = await getSettings();
+  const form = new FormData();
+  for (let i = 0; i < frames.length; i++) {
+    const blob = await (await fetch(frames[i])).blob();
+    form.append("files", blob, `frame_${String(i).padStart(3, "0")}.jpg`);
+  }
+  if (timestamps && timestamps.length) {
+    form.append("timestamps", JSON.stringify(timestamps));
+  }
+  if (platform) {
+    form.append("platform", platform);
+  }
+  if (sourceUrl) {
+    form.append("source_url", sourceUrl);
+  }
+
+  const resp = await fetch(`${backendUrl}/analyze/frames`, { method: "POST", body: form });
   return finish(resp);
 }
 
@@ -70,6 +107,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           break;
         case "ANALYZE_DATA_URL":
           sendResponse(await analyzeDataUrl(message.dataUrl, message.mediaKind, message.sourceUrl));
+          break;
+        case "ANALYZE_FRAMES":
+          sendResponse(await analyzeFrames(
+            message.frames,
+            message.timestamps,
+            message.sourceUrl,
+            message.platform,
+          ));
           break;
         case "GET_STATUS":
           sendResponse(await getStatus());

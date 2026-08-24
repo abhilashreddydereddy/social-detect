@@ -33,6 +33,13 @@ export async function analyzeVideo(file) {
   return handle(resp);
 }
 
+export async function analyzeMedia(file) {
+  const form = new FormData();
+  form.append("file", file);
+  const resp = await fetch(`${API_BASE_URL}/analyze/media`, { method: "POST", body: form });
+  return handle(resp);
+}
+
 export async function analyzeUrl(url, platformHint) {
   const resp = await fetch(`${API_BASE_URL}/analyze/url`, {
     method: "POST",

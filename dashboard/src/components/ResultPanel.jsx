@@ -50,6 +50,39 @@ export default function ResultPanel({ result }) {
         </div>
       )}
 
+      {result.audio_result && (
+        <div className="p-6 border-b border-ink-700">
+          <h3 className="font-display text-sm uppercase tracking-wide text-slate400 mb-3">
+            Audio authenticity
+          </h3>
+          {result.audio_result.available && result.audio_result.error == null ? (
+            <div className="font-mono text-sm space-y-1">
+              <div className="flex justify-between">
+                <span className="text-slate400">AI probability</span>
+                <span>{Math.round((result.audio_result.ai_probability || 0) * 100)}%</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate400">Confidence</span>
+                <span>{Math.round((result.audio_result.confidence || 0) * 100)}%</span>
+              </div>
+              {result.audio_result.duration_seconds != null && (
+                <div className="flex justify-between text-xs text-slate400 pt-1">
+                  <span>duration</span>
+                  <span>{result.audio_result.duration_seconds}s @ {result.audio_result.sample_rate} Hz</span>
+                </div>
+              )}
+              <p className="text-xs text-slate400 pt-2">
+                Soundtrack scored in parallel with frame analysis ({result.audio_result.detector}).
+              </p>
+            </div>
+          ) : (
+            <p className="font-mono text-xs text-signal-amber">
+              {result.audio_result.error || "Audio track unavailable"}
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="p-6 border-b border-ink-700">
         <h3 className="font-display text-sm uppercase tracking-wide text-slate400 mb-3">Evidence</h3>
         <EvidenceList evidence={result.evidence} />

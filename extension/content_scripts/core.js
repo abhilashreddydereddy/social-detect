@@ -13,7 +13,10 @@
  *     postSelector: string,                 // CSS selector matching each post container
  *     findMediaElement(postEl): HTMLElement | null,
  *     extractMedia(mediaEl): Promise<{ kind: "url", mediaType: "image"|"video", url: string }
- *                                   | { kind: "frame", dataUrl: string } | null>
+ *                                   | { kind: "frame", dataUrl: string }
+ *                                   | { kind: "clip", dataUrl: string, mediaType: "video" }
+ *                                   | { kind: "frames", frames: string[], timestamps?: number[] }
+ *                                   | null>
  *   }
  *
  * Everything renders inside a Shadow DOM so host-page CSS can never bleed
@@ -140,6 +143,18 @@
     }
     panel.appendChild(list);
 
+    if (result.audio_result) {
+      const audio = document.createElement("div");
+      audio.className = "sd-disclaimer";
+      if (result.audio_result.available && result.audio_result.error == null) {
+        const ap = Math.round((result.audio_result.ai_probability || 0) * 100);
+        audio.textContent = `Audio: ${ap}% AI probability (parallel soundtrack check)`;
+      } else {
+        audio.textContent = `Audio: ${result.audio_result.error || "unavailable"}`;
+      }
+      panel.appendChild(audio);
+    }
+
     const disclaimer = document.createElement("div");
     disclaimer.className = "sd-disclaimer";
     disclaimer.textContent = result.disclaimer;
@@ -168,6 +183,25 @@
         dataUrl: extracted.dataUrl,
         mediaKind: "image",
         sourceUrl: extracted.sourceUrl || null,
+        platform,
+      });
+    }
+    if (extracted.kind === "clip") {
+      return chrome.runtime.sendMessage({
+        type: "ANALYZE_DATA_URL",
+        dataUrl: extracted.dataUrl,
+        mediaKind: "video",
+        sourceUrl: extracted.sourceUrl || null,
+        platform,
+      });
+    }
+    if (extracted.kind === "frames") {
+      return chrome.runtime.sendMessage({
+        type: "ANALYZE_FRAMES",
+        frames: extracted.frames,
+        timestamps: extracted.timestamps || [],
+        sourceUrl: extracted.sourceUrl || null,
+        platform,
       });
     }
     return { ok: false, error: `Unsupported extraction kind: ${extracted.kind}` };
