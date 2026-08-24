@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     image_model_checkpoint_path: str | None = None
     video_model_checkpoint_path: str | None = None
     fusion_model_path: str | None = None
+    mfad_net_checkpoint_path: str | None = None
 
 
 settings = Settings()

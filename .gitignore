@@ -20,3 +20,6 @@ Thumbs.db
 
 .idea/
 .vscode/
+
+# Regenerable MFAD-Net synthetic crops (recreate via prepare_synthetic / smoke train)
+training/data/mfad_net/processed/

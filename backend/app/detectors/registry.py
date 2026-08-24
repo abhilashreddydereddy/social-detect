@@ -5,14 +5,9 @@ This is the ONE place you touch to add, remove, or swap a detector.
 Each detector is self-contained (app/detectors/image/*.py or
 app/detectors/video/*.py) and implements the BaseDetector interface.
 
-To add a new model (e.g. a real UniversalFakeDetect / DIRE / XceptionNet /
-FaceForensics++ / EfficientNet checkpoint, or a VideoMAE/TimeSformer video
-model):
-  1. Create app/detectors/image/my_detector.py or detectors/video/my_detector.py
-     implementing BaseDetector (see base.py for the contract).
-  2. Import and add an instance to IMAGE_DETECTORS / VIDEO_DETECTORS below.
-  3. Nothing else changes -- the API, fusion, and dashboard/extension all
-     consume detectors polymorphically.
+MFAD-Net (`mfad_net`) is registered for both image and video. It reports
+`available=False` until a trained checkpoint exists under
+`backend/models/mfad_net/` or `training/exports/mfad_net/`.
 """
 from __future__ import annotations
 
@@ -24,12 +19,16 @@ from app.detectors.image.noise_residual_detector import NoiseResidualDetector
 from app.detectors.image.compression_artifact_detector import CompressionArtifactDetector
 from app.detectors.image.metadata_detector import MetadataDetector
 from app.detectors.image.clip_semantic_detector import ClipSemanticDetector
+from app.detectors.mfad.mfad_net_detector import MFADNetDetector
 from app.detectors.multimodal_ensemble_detector import MultimodalEnsembleDetector
 from app.detectors.video.temporal_consistency_detector import TemporalConsistencyDetector
 
 # Singleton instances -- lazy-loaded on first use, so app startup stays fast
 # and detectors with optional heavy deps don't block the whole service.
+_MFAD = MFADNetDetector()
+
 IMAGE_DETECTORS: List[BaseDetector] = [
+    _MFAD,
     MultimodalEnsembleDetector(),
     FrequencyArtifactDetector(),
     NoiseResidualDetector(),
@@ -39,6 +38,7 @@ IMAGE_DETECTORS: List[BaseDetector] = [
 ]
 
 VIDEO_DETECTORS: List[BaseDetector] = [
+    _MFAD,
     MultimodalEnsembleDetector(),
     FrequencyArtifactDetector(),   # reused per-frame
     NoiseResidualDetector(),       # reused per-frame
@@ -65,6 +65,7 @@ def registry_status() -> List[dict]:
             "available": d.available,
             "supports_image": d.supports_image,
             "supports_video": d.supports_video,
+            "supports_audio": getattr(d, "supports_audio", False),
             "default_weight": d.default_weight,
         }
     return list(seen.values())

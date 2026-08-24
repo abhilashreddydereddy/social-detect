@@ -41,11 +41,19 @@ training/
 
 ## First target
 
-The fastest practical target is:
+**MFAD-Net** (paper implementation) lives under `training/mfad_net/`:
 
-- `image_branch`: integrate a pretrained or fine-tuned GRIP-UNINA-style image detector
-- `fusion`: train a small logistic-regression or gradient-boosted final scorer
-- `video_branch`: add a DeepfakeBench-backed video detector after the image path is working
+```bash
+pip install -r training/requirements.txt
+python -m training.mfad_net.scripts.train --config training/mfad_net/configs/smoke.yaml
+cp training/exports/mfad_net/mfad_net_best.pth backend/models/mfad_net/
+```
+
+See `training/mfad_net/README.md` for the full architecture (EfficientNet+FFT,
+Wav2Vec2+MFCC, GAT metadata, CMAF fusion, TSDD drift detector) and how to
+point `full.yaml` at FaceForensics++ / DFDC / WildDeepfake manifests.
+
+Older stubs remain under `image_branch/`, `video_branch/`, and `fusion/`.
 
 ## Suggested environments
 

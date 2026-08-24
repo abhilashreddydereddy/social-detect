@@ -1,0 +1,33 @@
+lite: true
+pretrained: false
+epochs: 5
+batch_size: 8
+lr: 0.0001
+weight_decay: 0.0001
+seed: 42
+num_workers: 0
+sample_rate: 16000
+audio_seconds: 1.0
+frames_per_clip: 4
+image_size: 224
+drift_threshold: 0.15
+window_size: 500
+aux_av_weight: 0.1
+aux_meta_weight: 0.05
+device: auto   # auto | cpu | cuda
+
+# Synthetic smoke data (auto-generated if missing)
+synthetic:
+  enabled: true
+  n_train: 256
+  n_val: 64
+  n_test: 64
+
+data:
+  train_manifest: training/data/mfad_net/splits/train.csv
+  val_manifest: training/data/mfad_net/splits/val.csv
+  test_manifest: training/data/mfad_net/splits/test.csv
+  processed_dir: training/data/mfad_net/processed
+
+output_dir: training/exports/mfad_net
+checkpoint_name: mfad_net_best.pth

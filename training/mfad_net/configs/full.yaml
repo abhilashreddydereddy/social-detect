@@ -1,0 +1,31 @@
+lite: false
+pretrained: true
+epochs: 20
+batch_size: 16
+lr: 0.0001
+weight_decay: 0.0001
+seed: 42
+num_workers: 4
+sample_rate: 16000
+audio_seconds: 2.0
+frames_per_clip: 8
+image_size: 224
+drift_threshold: 0.15
+window_size: 500
+aux_av_weight: 0.1
+aux_meta_weight: 0.05
+device: cuda
+
+# Point these at prepared FaceForensics++ / DFDC / WildDeepfake manifests
+# after Phase 1 preprocessing (see training/mfad_net/README.md).
+synthetic:
+  enabled: false
+
+data:
+  train_manifest: training/data/mfad_net/splits/train.csv
+  val_manifest: training/data/mfad_net/splits/val.csv
+  test_manifest: training/data/mfad_net/splits/test.csv
+  processed_dir: training/data/mfad_net/processed
+
+output_dir: training/exports/mfad_net
+checkpoint_name: mfad_net_best.pth

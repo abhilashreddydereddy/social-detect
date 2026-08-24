@@ -78,10 +78,18 @@ Shipped out of the box (dependency-light, no downloaded weights required):
    `app/detectors/registry.py`. Nothing else changes — the API, fusion
    logic, dashboard, and extension all consume detectors polymorphically.
 
-Good candidates per the project brief: **UniversalFakeDetect**, **DIRE**,
-**XceptionNet**/**EfficientNet** (via `timm`), **FaceForensics++**,
-**DeepFakeBench**, **VideoMAE**/**TimeSformer** for video. `clip_semantic_detector.py`
-already shows the lazy-import + graceful-degradation pattern to copy.
+**MFAD-Net** (paper architecture) is already wired as detector `mfad_net`:
+EfficientNet+FFT visual branch, Wav2Vec2+MFCC audio branch, GAT metadata,
+CMAF transformer fusion, and TSDD drift detection. Train with:
+
+```bash
+pip install -r training/requirements.txt
+python -m training.mfad_net.scripts.train --config training/mfad_net/configs/smoke.yaml
+cp training/exports/mfad_net/mfad_net_best.pth backend/models/mfad_net/
+```
+
+See `training/mfad_net/README.md` for full-dataset training
+(FaceForensics++ / DFDC / WildDeepfake).
 
 ### Score fusion (`app/core/fusion.py`)
 

@@ -28,6 +28,7 @@ class EvidenceCategory(str, Enum):
     semantic = "semantic"                            # CLIP/ViT semantic-embedding classifier
     temporal_inconsistency = "temporal_inconsistency"  # video-only: flicker between frames
     face_artifact = "face_artifact"                  # video/image: face-forensics style cues
+    audio_artifact = "audio_artifact"                # TTS / vocoder / AV desync cues (MFAD-Net)
 
 
 class Evidence(BaseModel):

@@ -1,0 +1,2 @@
+# Large checkpoints — copy into backend/models/mfad_net/ after training
+*.pth
