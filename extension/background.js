@@ -27,17 +27,30 @@ async function analyzeDataUrl(dataUrl, mediaKind, sourceUrl) {
   const blob = await (await fetch(dataUrl)).blob();
   const form = new FormData();
 
-  let endpoint = "/analyze/media";
-  let filename = "media.bin";
+  // Pixel captures from the page are always JPEG frames → image pipeline.
+  // Full video clips (rare) still go to /analyze/video.
+  let endpoint = "/analyze/image";
+  let filename = "capture.jpg";
   if (mediaKind === "video") {
     endpoint = "/analyze/video";
     filename = blob.type.includes("mp4") ? "clip.mp4" : "clip.webm";
-  } else if (mediaKind === "image") {
-    endpoint = "/analyze/image";
-    filename = "frame.jpg";
+  } else if (mediaKind === "media") {
+    endpoint = "/analyze/media";
+    filename = "media.bin";
   }
 
-  form.append("file", blob, filename);
+  // Ensure the backend accepts the upload as an image even if the blob
+  // type is empty/octet-stream after data-URL decoding.
+  const typedBlob = blob.type
+    ? blob
+    : new Blob([blob], { type: mediaKind === "video" ? "video/webm" : "image/jpeg" });
+
+  form.append("file", typedBlob, filename);
+  console.info("[Social Detect] POST", `${backendUrl}${endpoint}`, {
+    bytes: typedBlob.size,
+    type: typedBlob.type,
+    filename,
+  });
   const resp = await fetch(`${backendUrl}${endpoint}`, { method: "POST", body: form });
   return finish(resp);
 }
@@ -99,8 +112,16 @@ async function finish(resp) {
 async function injectPlatform(tabId, platform) {
   const files =
     platform === "youtube"
-      ? ["content_scripts/core.js", "content_scripts/platforms/youtube.js"]
-      : ["content_scripts/core.js", "content_scripts/platforms/instagram.js"];
+      ? [
+          "content_scripts/media_capture.js",
+          "content_scripts/core.js",
+          "content_scripts/platforms/youtube.js",
+        ]
+      : [
+          "content_scripts/media_capture.js",
+          "content_scripts/core.js",
+          "content_scripts/platforms/instagram.js",
+        ];
 
   try {
     await chrome.scripting.executeScript({
