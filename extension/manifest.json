@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Social Detect — AI Media Authenticity Checker",
   "short_name": "Social Detect",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Estimates whether images and videos on social media are AI-generated or manipulated. Returns a probability, a confidence score, and explainable evidence — never a definitive verdict.",
   "icons": {
     "16": "icons/icon16.png",
@@ -29,7 +29,12 @@
     "*://youtube.com/*",
     "*://youtu.be/*",
     "*://*.instagram.com/*",
-    "*://instagram.com/*"
+    "*://instagram.com/*",
+    "*://*.cdninstagram.com/*",
+    "*://*.fbcdn.net/*",
+    "*://*.ggpht.com/*",
+    "*://*.ytimg.com/*",
+    "*://*.googlevideo.com/*"
   ],
   "content_scripts": [
     {
@@ -37,7 +42,11 @@
         "*://*.instagram.com/*",
         "*://instagram.com/*"
       ],
-      "js": ["content_scripts/core.js", "content_scripts/platforms/instagram.js"],
+      "js": [
+        "content_scripts/media_capture.js",
+        "content_scripts/core.js",
+        "content_scripts/platforms/instagram.js"
+      ],
       "run_at": "document_idle"
     },
     {
@@ -46,7 +55,11 @@
         "*://youtube.com/*",
         "*://youtu.be/*"
       ],
-      "js": ["content_scripts/core.js", "content_scripts/platforms/youtube.js"],
+      "js": [
+        "content_scripts/media_capture.js",
+        "content_scripts/core.js",
+        "content_scripts/platforms/youtube.js"
+      ],
       "run_at": "document_idle",
       "all_frames": false
     }

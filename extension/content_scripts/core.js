@@ -156,7 +156,20 @@
   }
 
   async function runAnalysis(extracted, platform) {
-    if (!extracted) return { ok: false, error: "No media could be extracted from this post." };
+    if (!extracted) {
+      return {
+        ok: false,
+        error: "No media pixels could be extracted. Try again after the image/video finishes loading.",
+      };
+    }
+
+    console.info("[Social Detect] sending to backend:", {
+      kind: extracted.kind,
+      method: extracted.method || null,
+      platform,
+      hasDataUrl: Boolean(extracted.dataUrl),
+      urlHost: extracted.url ? (() => { try { return new URL(extracted.url).host; } catch { return "?"; } })() : null,
+    });
 
     if (extracted.kind === "url") {
       return chrome.runtime.sendMessage({
@@ -270,8 +283,33 @@
       button.disabled = true;
 
       try {
+        // Hide our UI so viewport screenshots don't include the Analyze button.
+        document.querySelectorAll(`[${HOST_ATTR}]`).forEach((h) => {
+          h.style.visibility = "hidden";
+        });
+        // Two RAFs so the browser paints without our overlay.
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
         const currentMediaEl = adapter.findMediaElement(post);
-        const extracted = currentMediaEl ? await adapter.extractMedia(currentMediaEl) : null;
+        let extracted = currentMediaEl ? await adapter.extractMedia(currentMediaEl) : null;
+
+        // Hard fallback: shared pixel extractor (never relies on backend CDN fetch).
+        if ((!extracted || extracted.kind === "url") && currentMediaEl && window.SocialDetectMedia) {
+          const pixel = await window.SocialDetectMedia.extractForBackend(currentMediaEl);
+          if (pixel) extracted = pixel;
+        }
+
+        // If adapter still returned a social CDN URL, do not send it to the
+        // backend — Instagram/YouTube CDNs block server downloads.
+        if (extracted?.kind === "url") {
+          const u = String(extracted.url || "");
+          const isDirectFile = /\.(jpe?g|png|webp|gif|mp4|webm)(\?|$)/i.test(u)
+            && !/instagram\.|cdninstagram\.|fbcdn\.|ytimg\.|googlevideo\./i.test(u);
+          if (!isDirectFile && currentMediaEl && window.SocialDetectMedia) {
+            extracted = await window.SocialDetectMedia.extractForBackend(currentMediaEl);
+          }
+        }
+
         const response = await runAnalysis(extracted, adapter.name);
         if (response?.ok) {
           buildPanelContent(shadow, "result", response.data);
@@ -281,6 +319,9 @@
       } catch (err) {
         buildPanelContent(shadow, "error", err?.message || String(err));
       } finally {
+        document.querySelectorAll(`[${HOST_ATTR}]`).forEach((h) => {
+          h.style.visibility = "visible";
+        });
         button.disabled = false;
       }
     }, true);

@@ -1,20 +1,11 @@
 /**
  * Instagram adapter.
  *
- * Instagram's DOM/class names are obfuscated and change often, so this
- * adapter deliberately avoids relying on generated class names and instead
- * uses structural/semantic signals: <article> as the post container, and
- * "the largest non-avatar <img>, or a <video>" as the media element.
- *
- * Video handling: Instagram often streams video via Media Source Extensions,
- * meaning `video.src`/`currentSrc` is a `blob:` URL that only exists inside
- * the page and can't be downloaded server-side. In that case we fall back
- * to analyzing a single captured frame (canvas snapshot) instead of the
- * full clip, and the resulting overlay is built from an image analysis --
- * still explainable, just frame-level rather than temporal.
+ * Finds posts/media structurally, then extracts PIXELS for the backend.
+ * We do not send Instagram CDN URLs to the server — they are blocked.
  */
 (() => {
-  const MIN_MEDIA_DIMENSION = 150; // px, filters out avatars/icons
+  const MIN_MEDIA_DIMENSION = 150;
   const REEL_SURFACE_SELECTORS = [
     "article",
     "main section",
@@ -34,18 +25,13 @@
 
   function getPostElements() {
     const posts = new Set();
-
     document.querySelectorAll("article").forEach((post) => posts.add(post));
 
-    const mediaCandidates = document.querySelectorAll("main video, main img");
-    mediaCandidates.forEach((mediaEl) => {
+    document.querySelectorAll("main video, main img").forEach((mediaEl) => {
       if (!isValidMedia(mediaEl)) return;
       if (mediaEl.closest("article")) return;
-
       const container = mediaEl.closest(REEL_SURFACE_SELECTORS.join(", ")) || mediaEl.parentElement;
-      if (container) {
-        posts.add(container);
-      }
+      if (container) posts.add(container);
     });
 
     return [...posts];
@@ -75,15 +61,11 @@
 
     const visibleWidth = Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0);
     const visibleHeight = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
-    if (visibleWidth <= 0 || visibleHeight <= 0) {
-      return false;
-    }
+    if (visibleWidth <= 0 || visibleHeight <= 0) return false;
 
     const visibleArea = visibleWidth * visibleHeight;
     const totalArea = Math.max(rect.width * rect.height, 1);
-    if ((visibleArea / totalArea) < 0.35) {
-      return false;
-    }
+    if ((visibleArea / totalArea) < 0.35) return false;
 
     if (mediaEl.tagName === "VIDEO" && rect.height > viewportHeight * 0.7) {
       const verticalCenter = rect.top + rect.height / 2;
@@ -95,38 +77,11 @@
     return true;
   }
 
-  function captureVideoFrame(video) {
-    try {
-      const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || video.clientWidth || 640;
-      canvas.height = video.videoHeight || video.clientHeight || 360;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-      return { kind: "frame", dataUrl, sourceUrl: location.href };
-    } catch (err) {
-      // Canvas is "tainted" if the video element lacks CORS headers --
-      // can't read pixel data in that case.
-      console.warn("[Social Detect] Could not capture video frame:", err);
-      return null;
-    }
-  }
-
   async function extractMedia(mediaEl) {
-    if (mediaEl.tagName === "IMG") {
-      const url = mediaEl.currentSrc || mediaEl.src;
-      if (!url) return null;
-      return { kind: "url", mediaType: "image", url };
+    if (!mediaEl) return null;
+    if (window.SocialDetectMedia?.extractForBackend) {
+      return window.SocialDetectMedia.extractForBackend(mediaEl);
     }
-
-    if (mediaEl.tagName === "VIDEO") {
-      const src = mediaEl.currentSrc || mediaEl.src;
-      if (src && !src.startsWith("blob:")) {
-        return { kind: "url", mediaType: "video", url: src };
-      }
-      return captureVideoFrame(mediaEl);
-    }
-
     return null;
   }
 
