@@ -1,27 +1,21 @@
 /**
  * Social Detect content-script core.
  *
- * This file is platform-agnostic. Each platform (Instagram, and later X,
- * Reddit, Facebook, TikTok, YouTube) provides a small "adapter" object
- * describing how to find posts and media on that site; this engine handles
- * everything else (scanning the DOM, injecting the control, talking to the
- * background service worker, and rendering the result overlay).
+ * This file is platform-agnostic. Each platform (Instagram, YouTube, …)
+ * provides a small "adapter" object describing how to find posts and media;
+ * this engine handles scanning, injecting the control, talking to the
+ * background service worker, and rendering the result overlay.
  *
- * Platform adapter shape (see platforms/instagram.js for a full example):
+ * Platform adapter shape (see platforms/instagram.js / youtube.js):
  *   {
  *     name: "instagram",
- *     postSelector: string,                 // CSS selector matching each post container
+ *     postSelector: string,
  *     findMediaElement(postEl): HTMLElement | null,
- *     extractMedia(mediaEl): Promise<{ kind: "url", mediaType: "image"|"video", url: string }
- *                                   | { kind: "frame", dataUrl: string }
- *                                   | { kind: "clip", dataUrl: string, mediaType: "video" }
- *                                   | { kind: "frames", frames: string[], timestamps?: number[] }
- *                                   | null>
+ *     extractMedia(mediaEl): Promise<{ kind: "url"|"frame"|"clip"|"frames", ... } | null>,
+ *     getPostElements?: () => Element[],
+ *     shouldShowControl?: (post, mediaEl, rect) => boolean,
+ *     navigationEvents?: string[],  // e.g. YouTube SPA: ["yt-navigate-finish"]
  *   }
- *
- * Everything renders inside a Shadow DOM so host-page CSS can never bleed
- * into our UI (and vice versa) -- important on sites with aggressive,
- * frequently-changing utility-class stylesheets.
  */
 
 (() => {
@@ -62,6 +56,7 @@
       padding: 14px;
       font-size: 12px;
       line-height: 1.4;
+      z-index: 2;
     }
     .sd-hidden { display: none; }
 
@@ -274,6 +269,7 @@
     button.addEventListener("click", async (evt) => {
       evt.preventDefault();
       evt.stopPropagation();
+      evt.stopImmediatePropagation();
 
       panelOpen = true;
       panel.classList.remove("sd-hidden");
@@ -294,7 +290,7 @@
       } finally {
         button.disabled = false;
       }
-    });
+    }, true);
 
     document.addEventListener("click", (evt) => {
       if (panelOpen && !host.contains(evt.target)) {
@@ -303,21 +299,24 @@
       }
     });
 
-    document.body.appendChild(host);
+    document.documentElement.appendChild(host);
     syncPosition();
 
     const reposition = () => syncPosition();
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
+    // Keep the button glued to the player while YouTube resizes / theater mode.
+    host._sdReposition = reposition;
   }
 
   function scan(adapter) {
     const posts = typeof adapter.getPostElements === "function"
       ? adapter.getPostElements()
-      : document.querySelectorAll(adapter.postSelector);
+      : [...document.querySelectorAll(adapter.postSelector)];
     const activePostIds = new Set();
 
     posts.forEach((post) => {
+      if (!post || !post.isConnected) return;
       const postId = ensurePostId(post);
       activePostIds.add(postId);
       const mediaEl = adapter.findMediaElement(post);
@@ -330,7 +329,10 @@
       }
 
       if (existingHost) {
+        // Important for YouTube: player often mounts before <video> has size.
+        // Reposition on every scan so the button appears once media is ready.
         post.setAttribute(PROCESSED_ATTR, "1");
+        positionHost(existingHost, post, adapter);
         return;
       }
 
@@ -346,12 +348,60 @@
     });
   }
 
+  function debounce(fn, ms) {
+    let t = null;
+    return (...args) => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        t = null;
+        fn(...args);
+      }, ms);
+    };
+  }
+
+  function whenBodyReady(cb) {
+    if (document.body) {
+      cb();
+      return;
+    }
+    const obs = new MutationObserver(() => {
+      if (document.body) {
+        obs.disconnect();
+        cb();
+      }
+    });
+    obs.observe(document.documentElement, { childList: true });
+  }
+
   function start(adapter) {
     chrome.storage.sync.get({ enabled: true }, ({ enabled }) => {
       if (!enabled) return;
-      scan(adapter);
-      const observer = new MutationObserver(() => scan(adapter));
-      observer.observe(document.body, { childList: true, subtree: true });
+
+      const runScan = debounce(() => scan(adapter), 150);
+
+      whenBodyReady(() => {
+        scan(adapter);
+        const observer = new MutationObserver(runScan);
+        observer.observe(document.body, { childList: true, subtree: true });
+
+        // Periodic catch-up for SPA players that update without useful mutations.
+        const intervalId = setInterval(() => scan(adapter), 2000);
+        window.addEventListener("beforeunload", () => clearInterval(intervalId), { once: true });
+      });
+
+      // Soft navigation (YouTube in-app router, etc.)
+      const navEvents = Array.isArray(adapter.navigationEvents)
+        ? adapter.navigationEvents
+        : [];
+      for (const evtName of navEvents) {
+        document.addEventListener(evtName, () => {
+          // Give the new player a tick to mount, then scan.
+          setTimeout(() => scan(adapter), 300);
+          setTimeout(() => scan(adapter), 1200);
+        });
+      }
+
+      window.addEventListener("popstate", () => setTimeout(() => scan(adapter), 300));
     });
   }
 

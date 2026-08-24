@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Social Detect — AI Media Authenticity Checker",
   "short_name": "Social Detect",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Estimates whether images and videos on social media are AI-generated or manipulated. Returns a probability, a confidence score, and explainable evidence — never a definitive verdict.",
   "icons": {
     "16": "icons/icon16.png",
@@ -21,7 +21,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "activeTab", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting", "tabs"],
   "host_permissions": [
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*",

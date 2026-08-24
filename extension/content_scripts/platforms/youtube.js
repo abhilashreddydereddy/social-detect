@@ -1,249 +1,208 @@
 /**
- * YouTube adapter.
+ * YouTube adapter — mirrors the Instagram approach.
+ *
+ * Instagram works because it:
+ *   1. Finds media-bearing containers from the live DOM
+ *   2. Picks the primary <video>/<img>
+ *   3. For MSE/blob: videos, captures ONE frame and POSTs it as an image
+ *
+ * YouTube is the same MSE/blob situation. Canvas readback is often blocked
+ * by CORS on YouTube, so if the Instagram-style canvas snapshot fails we
+ * fall back to chrome.tabs.captureVisibleTab + crop to the video rect
+ * (triggered by the Analyze click = user gesture / activeTab).
  *
  * Surfaces:
- *   - Watch pages (`/watch?v=...`): `#movie_player video.html5-main-video`
- *   - Shorts (`/shorts/...`): `ytd-reel-video-renderer video`
- *
- * YouTube streams via MSE (blob: URLs), so we cannot hand the backend a CDN
- * URL. Instead we prefer recording a short clip via `captureStream()` +
- * MediaRecorder (video+audio) and POSTing it to /analyze/video — the backend
- * then cuts frames and scores the soundtrack in parallel. If recording is
- * blocked, we fall back to seeking across the timeline and capturing several
- * canvas frames (visual-only).
+ *   - Watch pages (`/watch?v=...`): `#movie_player` / `ytd-player` + <video>
+ *   - Shorts (`/shorts/...`): `ytd-reel-video-renderer` + <video>
  */
 (() => {
-  const RECORD_SECONDS = 6;
-  const FRAME_SAMPLES = 8;
-
-  function isWatchPage() {
-    return location.pathname === "/watch" || location.pathname.startsWith("/watch");
-  }
+  const MIN_MEDIA_DIMENSION = 120;
 
   function isShortsPage() {
     return location.pathname.startsWith("/shorts");
   }
 
-  function getPostElements() {
-    if (isShortsPage()) {
-      const reels = document.querySelectorAll("ytd-reel-video-renderer");
-      if (reels.length) return [...reels];
+  function isValidMedia(el) {
+    if (!el) return false;
+    if (el.tagName === "VIDEO") {
+      const w = el.videoWidth || el.clientWidth || 0;
+      const h = el.videoHeight || el.clientHeight || 0;
+      return w >= MIN_MEDIA_DIMENSION && h >= 40;
     }
-    const player = document.querySelector("#movie_player");
-    if (player) return [player];
-    const video = document.querySelector("video.html5-main-video, ytd-player video, video");
-    return video ? [video.closest("#movie_player, ytd-player, ytd-reel-video-renderer") || video.parentElement] : [];
+    if (el.tagName === "IMG") {
+      return el.naturalWidth >= MIN_MEDIA_DIMENSION || el.clientWidth >= MIN_MEDIA_DIMENSION;
+    }
+    return false;
+  }
+
+  function getPostElements() {
+    const posts = new Set();
+
+    if (isShortsPage()) {
+      document.querySelectorAll("ytd-reel-video-renderer").forEach((el) => posts.add(el));
+    }
+
+    document.querySelectorAll("#movie_player, ytd-player").forEach((el) => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width >= 200 && rect.height >= 120) posts.add(el);
+    });
+
+    document.querySelectorAll("video.html5-main-video, video").forEach((video) => {
+      if (!isValidMedia(video)) return;
+      if (video.closest("#movie_player, ytd-player, ytd-reel-video-renderer")) return;
+      const container = video.closest("ytd-watch-flexy, ytd-reel-video-renderer") || video.parentElement;
+      if (container) posts.add(container);
+    });
+
+    return [...posts];
   }
 
   function findMediaElement(post) {
     if (!post) return null;
-    if (post.tagName === "VIDEO") return post;
-    return (
-      post.querySelector("video.html5-main-video") ||
-      post.querySelector("video")
-    );
+    if (post.tagName === "VIDEO" && isValidMedia(post)) return post;
+
+    const main = post.querySelector("video.html5-main-video");
+    if (isValidMedia(main)) return main;
+
+    const videos = Array.from(post.querySelectorAll("video")).filter(isValidMedia);
+    if (videos.length) {
+      return videos.reduce((largest, current) => {
+        const a = largest.clientWidth * largest.clientHeight;
+        const b = current.clientWidth * current.clientHeight;
+        return b > a ? current : largest;
+      });
+    }
+
+    const imgs = Array.from(post.querySelectorAll("img")).filter(isValidMedia);
+    if (!imgs.length) return null;
+    return imgs.reduce((largest, current) => {
+      const a = largest.clientWidth * largest.clientHeight;
+      const b = current.clientWidth * current.clientHeight;
+      return b > a ? current : largest;
+    });
   }
 
   function shouldShowControl(_post, mediaEl, rect) {
-    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
-    if (rect.bottom <= 0 || rect.top >= vh || rect.right <= 0 || rect.left >= vw) return false;
-    if (rect.width < 120 || rect.height < 80) return false;
-    // On Shorts, only the mostly-visible reel.
-    if (isShortsPage()) {
-      const visibleH = Math.min(rect.bottom, vh) - Math.max(rect.top, 0);
-      if (visibleH / Math.max(rect.height, 1) < 0.45) return false;
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+
+    if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
+      return false;
     }
-    return mediaEl.readyState >= 1 || mediaEl.videoWidth > 0;
+
+    const visibleWidth = Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0);
+    const visibleHeight = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
+    if (visibleWidth <= 0 || visibleHeight <= 0) return false;
+
+    const visibleArea = visibleWidth * visibleHeight;
+    const totalArea = Math.max(rect.width * rect.height, 1);
+    if ((visibleArea / totalArea) < 0.25) return false;
+
+    if (isShortsPage() && mediaEl.tagName === "VIDEO" && rect.height > viewportHeight * 0.5) {
+      const verticalCenter = rect.top + rect.height / 2;
+      if (verticalCenter < viewportHeight * 0.15 || verticalCenter > viewportHeight * 0.85) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   function captureVideoFrame(video) {
     try {
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth || video.clientWidth || 1280;
-      canvas.height = video.videoHeight || video.clientHeight || 720;
+      canvas.width = video.videoWidth || video.clientWidth || 640;
+      canvas.height = video.videoHeight || video.clientHeight || 360;
       if (canvas.width < 2 || canvas.height < 2) return null;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      return canvas.toDataURL("image/jpeg", 0.9);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+      return { kind: "frame", dataUrl, sourceUrl: location.href };
     } catch (err) {
-      console.warn("[Social Detect] Could not capture YouTube frame:", err);
+      console.warn("[Social Detect] Canvas frame capture failed (likely CORS):", err);
       return null;
     }
   }
 
-  function pickRecorderMime() {
-    const candidates = [
-      "video/webm;codecs=vp9,opus",
-      "video/webm;codecs=vp8,opus",
-      "video/webm",
-      "video/mp4",
-    ];
-    for (const mime of candidates) {
-      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported?.(mime)) {
-        return mime;
-      }
-    }
-    return "";
-  }
-
-  async function recordClip(video, seconds = RECORD_SECONDS) {
-    if (typeof video.captureStream !== "function" && typeof video.mozCaptureStream !== "function") {
-      return null;
-    }
-    const mime = pickRecorderMime();
-    if (!mime || typeof MediaRecorder === "undefined") return null;
-
-    const stream = (video.captureStream || video.mozCaptureStream).call(video);
-    if (!stream || stream.getTracks().length === 0) return null;
-
-    const hadAudio = stream.getAudioTracks().length > 0;
-    const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 2_500_000 });
-    const chunks = [];
-
-    const stopped = new Promise((resolve, reject) => {
-      recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunks.push(e.data);
-      };
-      recorder.onerror = (e) => reject(e.error || new Error("MediaRecorder failed"));
-      recorder.onstop = () => resolve();
-    });
-
-    const wasPaused = video.paused;
-    try {
-      if (wasPaused) {
-        await video.play().catch(() => {});
-      }
-      recorder.start(250);
-      await new Promise((r) => setTimeout(r, Math.max(1500, seconds * 1000)));
-      if (recorder.state !== "inactive") recorder.stop();
-      await stopped;
-    } catch (err) {
-      try { if (recorder.state !== "inactive") recorder.stop(); } catch { /* ignore */ }
-      stream.getTracks().forEach((t) => t.stop());
-      throw err;
-    } finally {
-      stream.getTracks().forEach((t) => t.stop());
-      if (wasPaused) {
-        try { video.pause(); } catch { /* ignore */ }
-      }
-    }
-
-    if (!chunks.length) return null;
-    const blob = new Blob(chunks, { type: mime.split(";")[0] });
-    if (blob.size < 1000) return null;
-
-    const dataUrl = await blobToDataUrl(blob);
-    return {
-      kind: "clip",
-      dataUrl,
-      mediaType: "video",
-      sourceUrl: location.href,
-      hasAudio: hadAudio,
-      note: hadAudio
-        ? "Recorded short YouTube clip (video+audio) for frame+audio analysis"
-        : "Recorded short YouTube clip (video only; no audio track in captureStream)",
-    };
-  }
-
-  function blobToDataUrl(blob) {
+  function loadImage(dataUrl) {
     return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(reader.error || new Error("FileReader failed"));
-      reader.readAsDataURL(blob);
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to load screenshot"));
+      img.src = dataUrl;
     });
   }
 
-  async function sampleFrames(video, count = FRAME_SAMPLES) {
-    const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
-    const originalTime = video.currentTime;
-    const wasPaused = video.paused;
-    const frames = [];
+  async function captureViewportFrame(mediaEl) {
+    const rect = mediaEl.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) return null;
 
-    const seekTo = (t) => new Promise((resolve) => {
-      const onSeeked = () => {
-        video.removeEventListener("seeked", onSeeked);
-        resolve();
-      };
-      video.addEventListener("seeked", onSeeked);
-      try {
-        video.currentTime = t;
-      } catch {
-        video.removeEventListener("seeked", onSeeked);
-        resolve();
-      }
-      // Safety timeout if seeked never fires.
-      setTimeout(() => {
-        video.removeEventListener("seeked", onSeeked);
-        resolve();
-      }, 800);
-    });
+    const shot = await chrome.runtime.sendMessage({ type: "CAPTURE_VISIBLE_TAB" });
+    if (!shot?.ok || !shot.dataUrl) {
+      console.warn("[Social Detect] captureVisibleTab failed:", shot?.error);
+      return null;
+    }
 
     try {
-      if (!wasPaused) {
-        try { video.pause(); } catch { /* ignore */ }
-      }
+      const img = await loadImage(shot.dataUrl);
+      const dpr = window.devicePixelRatio || 1;
+      const sx = Math.max(0, Math.round(rect.left * dpr));
+      const sy = Math.max(0, Math.round(rect.top * dpr));
+      const sw = Math.min(img.width - sx, Math.round(rect.width * dpr));
+      const sh = Math.min(img.height - sy, Math.round(rect.height * dpr));
+      if (sw < 2 || sh < 2) return null;
 
-      if (duration > 1.5) {
-        for (let i = 0; i < count; i++) {
-          const t = (duration * (i + 0.5)) / count;
-          await seekTo(Math.min(t, Math.max(duration - 0.05, 0)));
-          const dataUrl = captureVideoFrame(video);
-          if (dataUrl) frames.push({ timestamp: video.currentTime, dataUrl });
-        }
-      } else {
-        const dataUrl = captureVideoFrame(video);
-        if (dataUrl) frames.push({ timestamp: video.currentTime || 0, dataUrl });
-      }
-    } finally {
-      try {
-        await seekTo(originalTime);
-        if (!wasPaused) await video.play().catch(() => {});
-      } catch { /* ignore restore errors */ }
+      const canvas = document.createElement("canvas");
+      canvas.width = sw;
+      canvas.height = sh;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      return {
+        kind: "frame",
+        dataUrl: canvas.toDataURL("image/jpeg", 0.92),
+        sourceUrl: location.href,
+      };
+    } catch (err) {
+      console.warn("[Social Detect] Viewport crop failed:", err);
+      return null;
     }
-
-    if (!frames.length) return null;
-    if (frames.length === 1) {
-      return { kind: "frame", dataUrl: frames[0].dataUrl, sourceUrl: location.href };
-    }
-    return {
-      kind: "frames",
-      frames: frames.map((f) => f.dataUrl),
-      timestamps: frames.map((f) => f.timestamp),
-      sourceUrl: location.href,
-      mediaType: "video",
-      note: "Sampled YouTube frames (visual-only; audio unavailable without MediaRecorder)",
-    };
   }
 
   async function extractMedia(mediaEl) {
-    if (!mediaEl || mediaEl.tagName !== "VIDEO") return null;
+    if (!mediaEl) return null;
 
-    const src = mediaEl.currentSrc || mediaEl.src;
-    if (src && !src.startsWith("blob:") && !src.startsWith("mediasource:")) {
-      return { kind: "url", mediaType: "video", url: src };
+    if (mediaEl.tagName === "IMG") {
+      const url = mediaEl.currentSrc || mediaEl.src;
+      if (!url) return null;
+      return { kind: "url", mediaType: "image", url };
     }
 
-    // Prefer a short recorded clip so the backend can run frame + audio pipelines.
-    try {
-      const clip = await recordClip(mediaEl, RECORD_SECONDS);
-      if (clip) return clip;
-    } catch (err) {
-      console.warn("[Social Detect] YouTube clip capture failed, falling back to frames:", err);
+    if (mediaEl.tagName === "VIDEO") {
+      const src = mediaEl.currentSrc || mediaEl.src;
+      if (src && !src.startsWith("blob:") && !src.startsWith("mediasource:")) {
+        return { kind: "url", mediaType: "video", url: src };
+      }
+
+      // 1) Same path as Instagram: canvas snapshot of the <video>
+      const frame = captureVideoFrame(mediaEl);
+      if (frame) return frame;
+
+      // 2) YouTube CORS often blocks canvas — screenshot + crop instead
+      return captureViewportFrame(mediaEl);
     }
 
-    return sampleFrames(mediaEl, FRAME_SAMPLES);
+    return null;
   }
 
   if (window.SocialDetectCore) {
     window.SocialDetectCore.start({
       name: "youtube",
-      postSelector: "#movie_player, ytd-reel-video-renderer",
+      postSelector: "#movie_player, ytd-player, ytd-reel-video-renderer",
       getPostElements,
       findMediaElement,
       shouldShowControl,
       extractMedia,
+      navigationEvents: ["yt-navigate-finish", "yt-page-data-updated"],
     });
   }
 })();

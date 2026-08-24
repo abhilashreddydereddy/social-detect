@@ -78,6 +78,15 @@ async function analyzeFrames(frames, timestamps, sourceUrl, platform) {
   return finish(resp);
 }
 
+async function captureVisibleTab() {
+  try {
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: "jpeg", quality: 92 });
+    return { ok: true, dataUrl };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
 async function getStatus() {
   const { backendUrl } = await getSettings();
   const resp = await fetch(`${backendUrl}/status`);
@@ -115,6 +124,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             message.sourceUrl,
             message.platform,
           ));
+          break;
+        case "CAPTURE_VISIBLE_TAB":
+          sendResponse(await captureVisibleTab());
           break;
         case "GET_STATUS":
           sendResponse(await getStatus());
