@@ -31,6 +31,7 @@
       <div class="label-row">Supported now</div>
       <div class="pill-row">
         <span class="pill live">Instagram</span>
+        <span class="pill live">YouTube</span>
       </div>
       <div class="label-row">Coming soon</div>
       <div class="pill-row">
@@ -38,13 +39,22 @@
         <span class="pill">Reddit</span>
         <span class="pill">Facebook</span>
         <span class="pill">TikTok</span>
-        <span class="pill">YouTube</span>
       </div>
+    </section>
+
+    <section class="section">
+      <div class="label-row">This tab</div>
+      <div class="badge" id="tabStatus" style="display:block; margin-bottom:8px;">checking…</div>
+      <button id="injectBtn">Inject on this tab</button>
     </section>
 
     <footer>
       Estimates are probabilistic, never a verdict. Look for the 🔍 Analyze
-      button on posts.
+      button on Instagram posts and YouTube videos/Shorts.
+      <br /><br />
+      If YouTube shows nothing: open a /watch video, click
+      <strong>Inject on this tab</strong>, then hard-refresh the page
+      (Ctrl+Shift+R) after reloading the extension.
     </footer>
 
     <script src="popup.js"></script>

@@ -25,7 +25,7 @@ import io
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
 import cv2
@@ -37,9 +37,87 @@ from app.config import settings
 
 MAX_VIDEO_FRAMES = settings.max_video_frames
 
+IMAGE_CONTENT_TYPES = {
+    "image/jpeg", "image/png", "image/webp", "image/gif", "image/bmp", "image/tiff",
+}
+VIDEO_CONTENT_TYPES = {
+    "video/mp4", "video/webm", "video/quicktime", "video/x-matroska", "video/x-msvideo",
+}
+IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff")
+VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v")
+
 
 class MediaFetchError(Exception):
     pass
+
+
+def detect_media_kind(
+    raw: bytes,
+    content_type: str | None = None,
+    filename: str | None = None,
+) -> str:
+    """Return 'image' or 'video' from magic bytes, content-type, or filename.
+
+    Raises MediaFetchError when the payload cannot be classified as either.
+    """
+    kind = _sniff_magic(raw)
+    if kind:
+        return kind
+
+    ct = (content_type or "").split(";")[0].strip().lower()
+    if ct in IMAGE_CONTENT_TYPES or ct.startswith("image/"):
+        return "image"
+    if ct in VIDEO_CONTENT_TYPES or ct.startswith("video/"):
+        return "video"
+
+    name = (filename or "").lower().split("?")[0]
+    if name.endswith(IMAGE_EXTENSIONS):
+        return "image"
+    if name.endswith(VIDEO_EXTENSIONS):
+        return "video"
+
+    # Last-resort: try decoding as an image (covers odd content-types).
+    try:
+        Image.open(io.BytesIO(raw)).verify()
+        return "image"
+    except Exception:
+        pass
+
+    raise MediaFetchError(
+        f"Could not determine media type (content-type='{content_type or ''}', "
+        f"filename='{filename or ''}'). Upload an image or video file."
+    )
+
+
+def _sniff_magic(raw: bytes) -> str | None:
+    if not raw or len(raw) < 12:
+        return None
+    head = raw[:32]
+    # Images
+    if head.startswith(b"\xff\xd8\xff"):
+        return "image"  # JPEG
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image"
+    if head[:6] in (b"GIF87a", b"GIF89a"):
+        return "image"
+    if head.startswith(b"BM"):
+        return "image"
+    if head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return "image"
+    # Videos / containers
+    if head.startswith(b"\x1a\x45\xdf\xa3"):
+        return "video"  # Matroska / WebM
+    if head[4:8] == b"ftyp":
+        # ISO BMFF: mp4, mov, m4v, etc. — treat as video (HEIC rare for this API).
+        brand = head[8:12]
+        if brand in (b"heic", b"heif", b"mif1", b"msf1"):
+            return "image"
+        return "video"
+    if head.startswith(b"RIFF") and head[8:12] == b"AVI ":
+        return "video"
+    if head.startswith(b"OggS"):
+        return "video"
+    return None
 
 
 def decode_image_bytes(raw: bytes) -> np.ndarray:
@@ -114,6 +192,80 @@ def extract_video_frames(video_bytes: bytes, max_frames: int = MAX_VIDEO_FRAMES)
         return frames, timestamps
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+def extract_audio_waveform(
+    video_bytes: bytes,
+    sample_rate: int = 16000,
+) -> Tuple[Optional[np.ndarray], int, Optional[str]]:
+    """Extract mono PCM float32 audio from a video container via ffmpeg.
+
+    Returns (waveform, sample_rate, error_message).
+    waveform is None when the container has no audio stream or ffmpeg fails.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp_in:
+        tmp_in.write(video_bytes)
+        in_path = tmp_in.name
+
+    out_path = in_path + ".wav"
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", in_path,
+                "-vn",
+                "-ac", "1",
+                "-ar", str(sample_rate),
+                "-f", "wav",
+                out_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode != 0:
+            err = (result.stderr or "").strip().splitlines()
+            detail = err[-1] if err else "ffmpeg audio extraction failed"
+            # Common case: video with no audio track.
+            if "does not contain any stream" in (result.stderr or "") or "Output file does not contain any stream" in (result.stderr or ""):
+                return None, sample_rate, "Video has no audio track"
+            return None, sample_rate, detail
+
+        out = Path(out_path)
+        if not out.exists() or out.stat().st_size < 44:
+            return None, sample_rate, "Video has no audio track"
+
+        import wave
+        with wave.open(out_path, "rb") as wf:
+            sr = wf.getframerate()
+            n = wf.getnframes()
+            channels = wf.getnchannels()
+            width = wf.getsampwidth()
+            raw_pcm = wf.readframes(n)
+
+        if width == 2:
+            pcm = np.frombuffer(raw_pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        elif width == 1:
+            pcm = (np.frombuffer(raw_pcm, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+        elif width == 4:
+            pcm = np.frombuffer(raw_pcm, dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            return None, sample_rate, f"Unsupported PCM sample width: {width}"
+
+        if channels > 1:
+            pcm = pcm.reshape(-1, channels).mean(axis=1)
+
+        if pcm.size == 0:
+            return None, sr, "Extracted audio is empty"
+        return pcm, sr, None
+    except FileNotFoundError:
+        return None, sample_rate, "ffmpeg is not installed"
+    except subprocess.TimeoutExpired:
+        return None, sample_rate, "Audio extraction timed out"
+    except Exception as exc:  # noqa: BLE001
+        return None, sample_rate, str(exc)
+    finally:
+        Path(in_path).unlink(missing_ok=True)
+        Path(out_path).unlink(missing_ok=True)
 
 
 def probe_video_metadata(video_bytes: bytes) -> dict:

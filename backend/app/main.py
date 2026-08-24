@@ -51,5 +51,12 @@ async def root():
         "name": settings.app_name,
         "version": settings.version,
         "docs": "/docs",
-        "endpoints": ["/analyze/image", "/analyze/video", "/analyze/url", "/status"],
+        "endpoints": [
+            "/analyze/image",
+            "/analyze/video",
+            "/analyze/media",
+            "/analyze/frames",
+            "/analyze/url",
+            "/status",
+        ],
     }

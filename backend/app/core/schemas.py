@@ -28,7 +28,7 @@ class EvidenceCategory(str, Enum):
     semantic = "semantic"                            # CLIP/ViT semantic-embedding classifier
     temporal_inconsistency = "temporal_inconsistency"  # video-only: flicker between frames
     face_artifact = "face_artifact"                  # video/image: face-forensics style cues
-    audio_artifact = "audio_artifact"                # TTS / vocoder / AV desync cues (MFAD-Net)
+    audio_artifact = "audio_artifact"                # TTS / vocoder / AV desync / synthetic speech cues
 
 
 class Evidence(BaseModel):
@@ -64,6 +64,17 @@ class FrameResult(BaseModel):
     thumbnail_base64: Optional[str] = None
 
 
+class AudioResult(BaseModel):
+    """Summary of the parallel soundtrack authenticity probe for video."""
+    available: bool = True
+    ai_probability: Optional[float] = Field(None, ge=0.0, le=1.0)
+    confidence: Optional[float] = Field(None, ge=0.0, le=1.0)
+    sample_rate: Optional[int] = None
+    duration_seconds: Optional[float] = None
+    detector: Optional[str] = None
+    error: Optional[str] = None
+
+
 class AnalysisResponse(BaseModel):
     request_id: str
     media_type: MediaType
@@ -74,6 +85,7 @@ class AnalysisResponse(BaseModel):
     evidence: List[Evidence]
     detector_results: List[DetectorResult]
     frame_results: Optional[List[FrameResult]] = None
+    audio_result: Optional[AudioResult] = None
     metadata: dict = {}
     processing_time_ms: int
     disclaimer: str = (

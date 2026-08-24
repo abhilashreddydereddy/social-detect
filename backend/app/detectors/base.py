@@ -38,6 +38,7 @@ class BaseDetector(abc.ABC):
     #: Which media types this detector supports.
     supports_image: bool = True
     supports_video: bool = False
+    supports_audio: bool = False
 
     def __init__(self) -> None:
         self._loaded = False
@@ -67,6 +68,10 @@ class BaseDetector(abc.ABC):
         override this to analyze the whole clip instead of frame-by-frame.
         """
         return [self.analyze_image(f) for f in frames]
+
+    def analyze_audio(self, waveform: np.ndarray, sample_rate: int) -> DetectorResult:
+        """Optional audio path for video soundtracks. Override in audio detectors."""
+        return self.safe_result("audio analysis not supported by this detector")
 
     def safe_result(self, error: str) -> DetectorResult:
         return DetectorResult(

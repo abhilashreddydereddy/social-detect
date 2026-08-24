@@ -1,18 +1,20 @@
 import React, { useState } from "react";
 import UploadImage from "./components/UploadImage.jsx";
 import UploadVideo from "./components/UploadVideo.jsx";
+import UploadAuto from "./components/UploadAuto.jsx";
 import UrlAnalyze from "./components/UrlAnalyze.jsx";
 import ResultPanel from "./components/ResultPanel.jsx";
 import StatusPill from "./components/StatusPill.jsx";
 
 const TABS = [
+  { id: "auto", label: "Auto-detect" },
   { id: "image", label: "Upload image" },
   { id: "video", label: "Upload video" },
   { id: "url", label: "Paste URL" },
 ];
 
 export default function App() {
-  const [tab, setTab] = useState("image");
+  const [tab, setTab] = useState("auto");
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -55,6 +57,7 @@ export default function App() {
             ))}
           </div>
 
+          {tab === "auto" && <UploadAuto onResult={handleResult} onLoading={setLoading} onError={setError} />}
           {tab === "image" && <UploadImage onResult={handleResult} onLoading={setLoading} onError={setError} />}
           {tab === "video" && <UploadVideo onResult={handleResult} onLoading={setLoading} onError={setError} />}
           {tab === "url" && <UrlAnalyze onResult={handleResult} onLoading={setLoading} onError={setError} />}
@@ -92,7 +95,7 @@ export default function App() {
         <div className="lg:col-span-3">
           {loading && (
             <div className="border border-ink-700 rounded-lg p-10 text-center font-mono text-sm text-slate400 relative overflow-hidden scanline">
-              running detectors…
+              detecting media · cutting frames · scoring audio…
             </div>
           )}
           {!loading && result && <ResultPanel result={result} />}

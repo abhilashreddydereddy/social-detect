@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import List
 
+from app.detectors.audio.synthetic_speech_detector import SyntheticSpeechDetector
 from app.detectors.base import BaseDetector
 from app.detectors.image.frequency_artifact_detector import FrequencyArtifactDetector
 from app.detectors.image.noise_residual_detector import NoiseResidualDetector
@@ -46,6 +47,10 @@ VIDEO_DETECTORS: List[BaseDetector] = [
     ClipSemanticDetector(),        # reused per-frame
 ]
 
+AUDIO_DETECTORS: List[BaseDetector] = [
+    SyntheticSpeechDetector(),
+]
+
 
 def active_image_detectors() -> List[BaseDetector]:
     return [d for d in IMAGE_DETECTORS if d.available]
@@ -55,9 +60,13 @@ def active_video_detectors() -> List[BaseDetector]:
     return [d for d in VIDEO_DETECTORS if d.available]
 
 
+def active_audio_detectors() -> List[BaseDetector]:
+    return [d for d in AUDIO_DETECTORS if d.available]
+
+
 def registry_status() -> List[dict]:
     seen = {}
-    for d in IMAGE_DETECTORS + VIDEO_DETECTORS:
+    for d in IMAGE_DETECTORS + VIDEO_DETECTORS + AUDIO_DETECTORS:
         if d.name in seen:
             continue
         seen[d.name] = {

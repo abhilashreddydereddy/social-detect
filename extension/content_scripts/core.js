@@ -1,30 +1,20 @@
 /**
  * Social Detect content-script core.
  *
- * This file is platform-agnostic. Each platform (Instagram, and later X,
- * Reddit, Facebook, TikTok, YouTube) provides a small "adapter" object
- * describing how to find posts and media on that site; this engine handles
- * everything else (scanning the DOM, injecting the control, talking to the
- * background service worker, and rendering the result overlay).
- *
- * Platform adapter shape (see platforms/instagram.js for a full example):
- *   {
- *     name: "instagram",
- *     postSelector: string,                 // CSS selector matching each post container
- *     findMediaElement(postEl): HTMLElement | null,
- *     extractMedia(mediaEl): Promise<{ kind: "url", mediaType: "image"|"video", url: string }
- *                                   | { kind: "frame", dataUrl: string } | null>
- *   }
- *
- * Everything renders inside a Shadow DOM so host-page CSS can never bleed
- * into our UI (and vice versa) -- important on sites with aggressive,
- * frequently-changing utility-class stylesheets.
+ * Platform-agnostic engine. Adapters (instagram.js / youtube.js) call
+ * SocialDetectCore.start(...). Safe to inject more than once (idempotent).
  */
 
 (() => {
+  if (window.__SOCIAL_DETECT_CORE_LOADED__) {
+    return;
+  }
+  window.__SOCIAL_DETECT_CORE_LOADED__ = true;
+
   const PROCESSED_ATTR = "data-social-detect-processed";
   const HOST_ATTR = "data-social-detect-host";
   const POST_ID_ATTR = "data-social-detect-id";
+  const STARTED = new Set();
   let postCounter = 0;
 
   const STYLES = `
@@ -59,6 +49,7 @@
       padding: 14px;
       font-size: 12px;
       line-height: 1.4;
+      z-index: 2;
     }
     .sd-hidden { display: none; }
 
@@ -103,7 +94,7 @@
 
     const result = payload;
     const pct = Math.round(result.ai_probability * 100);
-    const topEvidence = [...result.evidence].slice(0, 3);
+    const topEvidence = [...(result.evidence || [])].slice(0, 3);
 
     const row = document.createElement("div");
     row.className = "sd-row";
@@ -140,6 +131,18 @@
     }
     panel.appendChild(list);
 
+    if (result.audio_result) {
+      const audio = document.createElement("div");
+      audio.className = "sd-disclaimer";
+      if (result.audio_result.available && result.audio_result.error == null) {
+        const ap = Math.round((result.audio_result.ai_probability || 0) * 100);
+        audio.textContent = `Audio: ${ap}% AI probability (parallel soundtrack check)`;
+      } else {
+        audio.textContent = `Audio: ${result.audio_result.error || "unavailable"}`;
+      }
+      panel.appendChild(audio);
+    }
+
     const disclaimer = document.createElement("div");
     disclaimer.className = "sd-disclaimer";
     disclaimer.textContent = result.disclaimer;
@@ -168,6 +171,25 @@
         dataUrl: extracted.dataUrl,
         mediaKind: "image",
         sourceUrl: extracted.sourceUrl || null,
+        platform,
+      });
+    }
+    if (extracted.kind === "clip") {
+      return chrome.runtime.sendMessage({
+        type: "ANALYZE_DATA_URL",
+        dataUrl: extracted.dataUrl,
+        mediaKind: "video",
+        sourceUrl: extracted.sourceUrl || null,
+        platform,
+      });
+    }
+    if (extracted.kind === "frames") {
+      return chrome.runtime.sendMessage({
+        type: "ANALYZE_FRAMES",
+        frames: extracted.frames,
+        timestamps: extracted.timestamps || [],
+        sourceUrl: extracted.sourceUrl || null,
+        platform,
       });
     }
     return { ok: false, error: `Unsupported extraction kind: ${extracted.kind}` };
@@ -240,6 +262,7 @@
     button.addEventListener("click", async (evt) => {
       evt.preventDefault();
       evt.stopPropagation();
+      evt.stopImmediatePropagation();
 
       panelOpen = true;
       panel.classList.remove("sd-hidden");
@@ -260,7 +283,7 @@
       } finally {
         button.disabled = false;
       }
-    });
+    }, true);
 
     document.addEventListener("click", (evt) => {
       if (panelOpen && !host.contains(evt.target)) {
@@ -269,21 +292,23 @@
       }
     });
 
-    document.body.appendChild(host);
+    (document.documentElement || document.body).appendChild(host);
     syncPosition();
 
     const reposition = () => syncPosition();
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
+    host._sdReposition = reposition;
   }
 
   function scan(adapter) {
     const posts = typeof adapter.getPostElements === "function"
       ? adapter.getPostElements()
-      : document.querySelectorAll(adapter.postSelector);
+      : [...document.querySelectorAll(adapter.postSelector)];
     const activePostIds = new Set();
 
     posts.forEach((post) => {
+      if (!post || !post.isConnected) return;
       const postId = ensurePostId(post);
       activePostIds.add(postId);
       const mediaEl = adapter.findMediaElement(post);
@@ -297,6 +322,7 @@
 
       if (existingHost) {
         post.setAttribute(PROCESSED_ATTR, "1");
+        positionHost(existingHost, post, adapter);
         return;
       }
 
@@ -312,14 +338,82 @@
     });
   }
 
+  function debounce(fn, ms) {
+    let t = null;
+    return (...args) => {
+      if (t) clearTimeout(t);
+      t = setTimeout(() => {
+        t = null;
+        fn(...args);
+      }, ms);
+    };
+  }
+
+  function whenBodyReady(cb) {
+    if (document.body) {
+      cb();
+      return;
+    }
+    const obs = new MutationObserver(() => {
+      if (document.body) {
+        obs.disconnect();
+        cb();
+      }
+    });
+    obs.observe(document.documentElement, { childList: true });
+  }
+
   function start(adapter) {
+    if (!adapter || !adapter.name) return;
+    if (STARTED.has(adapter.name)) {
+      // Already running for this platform — just force a rescan.
+      try { scan(adapter); } catch (err) {
+        console.warn("[Social Detect] rescan failed:", err);
+      }
+      return;
+    }
+    STARTED.add(adapter.name);
+    console.info(`[Social Detect] starting adapter: ${adapter.name} on ${location.href}`);
+
     chrome.storage.sync.get({ enabled: true }, ({ enabled }) => {
-      if (!enabled) return;
-      scan(adapter);
-      const observer = new MutationObserver(() => scan(adapter));
-      observer.observe(document.body, { childList: true, subtree: true });
+      if (!enabled) {
+        console.info("[Social Detect] disabled in extension settings");
+        return;
+      }
+
+      const runScan = debounce(() => scan(adapter), 150);
+
+      whenBodyReady(() => {
+        scan(adapter);
+        const observer = new MutationObserver(runScan);
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        setInterval(() => scan(adapter), 1500);
+      });
+
+      const navEvents = Array.isArray(adapter.navigationEvents) ? adapter.navigationEvents : [];
+      for (const evtName of navEvents) {
+        document.addEventListener(evtName, () => {
+          setTimeout(() => scan(adapter), 200);
+          setTimeout(() => scan(adapter), 1000);
+        });
+      }
+      window.addEventListener("popstate", () => setTimeout(() => scan(adapter), 300));
     });
   }
 
-  window.SocialDetectCore = { start };
+  // Allow the popup / background to ask "is the content script alive?"
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "SD_PING") {
+      sendResponse({
+        ok: true,
+        href: location.href,
+        adapters: [...STARTED],
+        coreLoaded: true,
+      });
+      return true;
+    }
+    return false;
+  });
+
+  window.SocialDetectCore = { start, scan, started: STARTED };
 })();
