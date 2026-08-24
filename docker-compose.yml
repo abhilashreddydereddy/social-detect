@@ -1,0 +1,65 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: social_detect
+      POSTGRES_PASSWORD: social_detect
+      POSTGRES_DB: social_detect
+    ports:
+      - "5432:5432"
+    volumes:
+      - social_detect_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U social_detect"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SOCIAL_DETECT_DATABASE_URL: postgresql+asyncpg://social_detect:social_detect@db:5432/social_detect
+      SOCIAL_DETECT_REDIS_URL: redis://redis:6379/0
+      SOCIAL_DETECT_USE_REDIS_CACHE: "true"
+      SOCIAL_DETECT_CORS_ALLOW_ORIGINS: '["http://localhost:5173"]'
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    # Uncomment for GPU inference (requires the NVIDIA Container Toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  dashboard:
+    build: ./dashboard
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules
+
+volumes:
+  social_detect_pgdata:

@@ -1,0 +1,52 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Social Detect</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="title">
+        <span class="dot" id="statusDot"></span>
+        Social Detect
+      </div>
+      <span class="badge" id="statusBadge">checking…</span>
+    </header>
+
+    <section class="section">
+      <label class="row">
+        <span>Enabled on supported sites</span>
+        <input type="checkbox" id="enabledToggle" />
+      </label>
+    </section>
+
+    <section class="section">
+      <label for="backendUrl">Backend URL</label>
+      <input type="text" id="backendUrl" placeholder="http://localhost:8000" />
+      <button id="saveBtn">Save</button>
+    </section>
+
+    <section class="section">
+      <div class="label-row">Supported now</div>
+      <div class="pill-row">
+        <span class="pill live">Instagram</span>
+      </div>
+      <div class="label-row">Coming soon</div>
+      <div class="pill-row">
+        <span class="pill">X</span>
+        <span class="pill">Reddit</span>
+        <span class="pill">Facebook</span>
+        <span class="pill">TikTok</span>
+        <span class="pill">YouTube</span>
+      </div>
+    </section>
+
+    <footer>
+      Estimates are probabilistic, never a verdict. Look for the 🔍 Analyze
+      button on posts.
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

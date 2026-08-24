@@ -1,0 +1,10 @@
+name: video-branch-baseline
+train_manifest: training/data/manifests/video_train.csv
+val_manifest: training/data/manifests/video_val.csv
+output_dir: training/exports/video_branch
+framework: deepfakebench
+device: cuda
+frames_per_clip: 16
+epochs: 3
+batch_size: 4
+learning_rate: 0.0001

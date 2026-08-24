@@ -1,0 +1,14 @@
+name: image-branch-baseline
+train_manifest: training/data/manifests/image_train.csv
+val_manifest: training/data/manifests/image_val.csv
+output_dir: training/exports/image_branch
+model_family: grip_unina_clip
+device: cuda
+batch_size: 16
+num_workers: 4
+epochs: 3
+learning_rate: 0.0001
+weight_decay: 0.0001
+image_size: 224
+label_column: label
+path_column: path

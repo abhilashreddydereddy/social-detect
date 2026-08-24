@@ -1,0 +1,35 @@
+# --- Core API ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+pydantic==2.9.2
+pydantic-settings==2.5.2
+httpx==0.27.2
+
+# --- Media / CV processing ---
+opencv-python-headless==4.10.0.84
+numpy==1.26.4
+Pillow==10.4.0
+scipy==1.14.1
+
+# --- Persistence ---
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.2
+
+# --- Optional caching ---
+redis==5.0.8
+
+# --- ML stack (optional/heavy; detectors degrade gracefully without these) ---
+torch==2.4.1
+torchvision==0.19.1
+transformers==4.44.2
+# timm is commonly used for XceptionNet/EfficientNet/ViT backbones
+timm==1.0.9
+
+# --- Dev / testing ---
+pytest==8.3.3
+pytest-asyncio==0.24.0
+
+# ffmpeg/ffprobe are NOT pip-installable; install the system package
+# (see backend/Dockerfile and README for apt/brew instructions).
