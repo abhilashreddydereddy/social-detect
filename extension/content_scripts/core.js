@@ -1,27 +1,20 @@
 /**
  * Social Detect content-script core.
  *
- * This file is platform-agnostic. Each platform (Instagram, YouTube, …)
- * provides a small "adapter" object describing how to find posts and media;
- * this engine handles scanning, injecting the control, talking to the
- * background service worker, and rendering the result overlay.
- *
- * Platform adapter shape (see platforms/instagram.js / youtube.js):
- *   {
- *     name: "instagram",
- *     postSelector: string,
- *     findMediaElement(postEl): HTMLElement | null,
- *     extractMedia(mediaEl): Promise<{ kind: "url"|"frame"|"clip"|"frames", ... } | null>,
- *     getPostElements?: () => Element[],
- *     shouldShowControl?: (post, mediaEl, rect) => boolean,
- *     navigationEvents?: string[],  // e.g. YouTube SPA: ["yt-navigate-finish"]
- *   }
+ * Platform-agnostic engine. Adapters (instagram.js / youtube.js) call
+ * SocialDetectCore.start(...). Safe to inject more than once (idempotent).
  */
 
 (() => {
+  if (window.__SOCIAL_DETECT_CORE_LOADED__) {
+    return;
+  }
+  window.__SOCIAL_DETECT_CORE_LOADED__ = true;
+
   const PROCESSED_ATTR = "data-social-detect-processed";
   const HOST_ATTR = "data-social-detect-host";
   const POST_ID_ATTR = "data-social-detect-id";
+  const STARTED = new Set();
   let postCounter = 0;
 
   const STYLES = `
@@ -101,7 +94,7 @@
 
     const result = payload;
     const pct = Math.round(result.ai_probability * 100);
-    const topEvidence = [...result.evidence].slice(0, 3);
+    const topEvidence = [...(result.evidence || [])].slice(0, 3);
 
     const row = document.createElement("div");
     row.className = "sd-row";
@@ -299,13 +292,12 @@
       }
     });
 
-    document.documentElement.appendChild(host);
+    (document.documentElement || document.body).appendChild(host);
     syncPosition();
 
     const reposition = () => syncPosition();
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);
-    // Keep the button glued to the player while YouTube resizes / theater mode.
     host._sdReposition = reposition;
   }
 
@@ -329,8 +321,6 @@
       }
 
       if (existingHost) {
-        // Important for YouTube: player often mounts before <video> has size.
-        // Reposition on every scan so the button appears once media is ready.
         post.setAttribute(PROCESSED_ATTR, "1");
         positionHost(existingHost, post, adapter);
         return;
@@ -374,36 +364,56 @@
   }
 
   function start(adapter) {
+    if (!adapter || !adapter.name) return;
+    if (STARTED.has(adapter.name)) {
+      // Already running for this platform — just force a rescan.
+      try { scan(adapter); } catch (err) {
+        console.warn("[Social Detect] rescan failed:", err);
+      }
+      return;
+    }
+    STARTED.add(adapter.name);
+    console.info(`[Social Detect] starting adapter: ${adapter.name} on ${location.href}`);
+
     chrome.storage.sync.get({ enabled: true }, ({ enabled }) => {
-      if (!enabled) return;
+      if (!enabled) {
+        console.info("[Social Detect] disabled in extension settings");
+        return;
+      }
 
       const runScan = debounce(() => scan(adapter), 150);
 
       whenBodyReady(() => {
         scan(adapter);
         const observer = new MutationObserver(runScan);
-        observer.observe(document.body, { childList: true, subtree: true });
-
-        // Periodic catch-up for SPA players that update without useful mutations.
-        const intervalId = setInterval(() => scan(adapter), 2000);
-        window.addEventListener("beforeunload", () => clearInterval(intervalId), { once: true });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+        setInterval(() => scan(adapter), 1500);
       });
 
-      // Soft navigation (YouTube in-app router, etc.)
-      const navEvents = Array.isArray(adapter.navigationEvents)
-        ? adapter.navigationEvents
-        : [];
+      const navEvents = Array.isArray(adapter.navigationEvents) ? adapter.navigationEvents : [];
       for (const evtName of navEvents) {
         document.addEventListener(evtName, () => {
-          // Give the new player a tick to mount, then scan.
-          setTimeout(() => scan(adapter), 300);
-          setTimeout(() => scan(adapter), 1200);
+          setTimeout(() => scan(adapter), 200);
+          setTimeout(() => scan(adapter), 1000);
         });
       }
-
       window.addEventListener("popstate", () => setTimeout(() => scan(adapter), 300));
     });
   }
 
-  window.SocialDetectCore = { start };
+  // Allow the popup / background to ask "is the content script alive?"
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "SD_PING") {
+      sendResponse({
+        ok: true,
+        href: location.href,
+        adapters: [...STARTED],
+        coreLoaded: true,
+      });
+      return true;
+    }
+    return false;
+  });
+
+  window.SocialDetectCore = { start, scan, started: STARTED };
 })();

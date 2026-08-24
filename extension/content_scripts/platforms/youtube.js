@@ -1,22 +1,14 @@
 /**
- * YouTube adapter — mirrors the Instagram approach.
+ * YouTube adapter — same capture contract as Instagram.
  *
- * Instagram works because it:
- *   1. Finds media-bearing containers from the live DOM
- *   2. Picks the primary <video>/<img>
- *   3. For MSE/blob: videos, captures ONE frame and POSTs it as an image
+ * Finds the player / Shorts reel, grabs the main <video>, and for MSE/blob
+ * streams captures a single frame (canvas, then viewport screenshot fallback).
  *
- * YouTube is the same MSE/blob situation. Canvas readback is often blocked
- * by CORS on YouTube, so if the Instagram-style canvas snapshot fails we
- * fall back to chrome.tabs.captureVisibleTab + crop to the video rect
- * (triggered by the Analyze click = user gesture / activeTab).
- *
- * Surfaces:
- *   - Watch pages (`/watch?v=...`): `#movie_player` / `ytd-player` + <video>
- *   - Shorts (`/shorts/...`): `ytd-reel-video-renderer` + <video>
+ * Also self-boots if injected programmatically by the background worker
+ * (YouTube SPA soft-nav often misses declarative content_scripts).
  */
 (() => {
-  const MIN_MEDIA_DIMENSION = 120;
+  const MIN_MEDIA_DIMENSION = 80;
 
   function isShortsPage() {
     return location.pathname.startsWith("/shorts");
@@ -25,9 +17,10 @@
   function isValidMedia(el) {
     if (!el) return false;
     if (el.tagName === "VIDEO") {
-      const w = el.videoWidth || el.clientWidth || 0;
-      const h = el.videoHeight || el.clientHeight || 0;
-      return w >= MIN_MEDIA_DIMENSION && h >= 40;
+      const w = el.videoWidth || el.clientWidth || el.offsetWidth || 0;
+      const h = el.videoHeight || el.clientHeight || el.offsetHeight || 0;
+      // Accept early: YouTube often mounts <video> before metadata arrives.
+      return w >= MIN_MEDIA_DIMENSION || el.clientWidth >= MIN_MEDIA_DIMENSION;
     }
     if (el.tagName === "IMG") {
       return el.naturalWidth >= MIN_MEDIA_DIMENSION || el.clientWidth >= MIN_MEDIA_DIMENSION;
@@ -42,15 +35,23 @@
       document.querySelectorAll("ytd-reel-video-renderer").forEach((el) => posts.add(el));
     }
 
-    document.querySelectorAll("#movie_player, ytd-player").forEach((el) => {
+    const players = document.querySelectorAll(
+      "#movie_player, ytd-player#ytd-player, ytd-player, #player-container-inner, #player",
+    );
+    players.forEach((el) => {
       const rect = el.getBoundingClientRect();
-      if (rect.width >= 200 && rect.height >= 120) posts.add(el);
+      // Allow zero-size briefly; scan loop will hide until ready.
+      if (rect.width >= 160 || rect.height >= 90 || el.querySelector("video")) {
+        posts.add(el);
+      }
     });
 
+    // Always consider the largest page video as a post container.
     document.querySelectorAll("video.html5-main-video, video").forEach((video) => {
-      if (!isValidMedia(video)) return;
-      if (video.closest("#movie_player, ytd-player, ytd-reel-video-renderer")) return;
-      const container = video.closest("ytd-watch-flexy, ytd-reel-video-renderer") || video.parentElement;
+      if (!video) return;
+      const container =
+        video.closest("#movie_player, ytd-player, ytd-reel-video-renderer, ytd-watch-flexy") ||
+        video.parentElement;
       if (container) posts.add(container);
     });
 
@@ -59,48 +60,38 @@
 
   function findMediaElement(post) {
     if (!post) return null;
-    if (post.tagName === "VIDEO" && isValidMedia(post)) return post;
+    if (post.tagName === "VIDEO") return post;
 
     const main = post.querySelector("video.html5-main-video");
-    if (isValidMedia(main)) return main;
+    if (main) return main;
 
-    const videos = Array.from(post.querySelectorAll("video")).filter(isValidMedia);
+    const videos = Array.from(post.querySelectorAll("video"));
     if (videos.length) {
       return videos.reduce((largest, current) => {
-        const a = largest.clientWidth * largest.clientHeight;
-        const b = current.clientWidth * current.clientHeight;
+        const a = (largest.clientWidth || 0) * (largest.clientHeight || 0);
+        const b = (current.clientWidth || 0) * (current.clientHeight || 0);
         return b > a ? current : largest;
       });
     }
-
-    const imgs = Array.from(post.querySelectorAll("img")).filter(isValidMedia);
-    if (!imgs.length) return null;
-    return imgs.reduce((largest, current) => {
-      const a = largest.clientWidth * largest.clientHeight;
-      const b = current.clientWidth * current.clientHeight;
-      return b > a ? current : largest;
-    });
+    return null;
   }
 
   function shouldShowControl(_post, mediaEl, rect) {
     const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
 
+    if (rect.width < 80 || rect.height < 45) return false;
     if (rect.bottom <= 0 || rect.top >= viewportHeight || rect.right <= 0 || rect.left >= viewportWidth) {
       return false;
     }
 
     const visibleWidth = Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0);
     const visibleHeight = Math.min(rect.bottom, viewportHeight) - Math.max(rect.top, 0);
-    if (visibleWidth <= 0 || visibleHeight <= 0) return false;
+    if (visibleWidth < 40 || visibleHeight < 40) return false;
 
-    const visibleArea = visibleWidth * visibleHeight;
-    const totalArea = Math.max(rect.width * rect.height, 1);
-    if ((visibleArea / totalArea) < 0.25) return false;
-
-    if (isShortsPage() && mediaEl.tagName === "VIDEO" && rect.height > viewportHeight * 0.5) {
+    if (isShortsPage() && rect.height > viewportHeight * 0.45) {
       const verticalCenter = rect.top + rect.height / 2;
-      if (verticalCenter < viewportHeight * 0.15 || verticalCenter > viewportHeight * 0.85) {
+      if (verticalCenter < viewportHeight * 0.1 || verticalCenter > viewportHeight * 0.9) {
         return false;
       }
     }
@@ -116,10 +107,9 @@
       if (canvas.width < 2 || canvas.height < 2) return null;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-      return { kind: "frame", dataUrl, sourceUrl: location.href };
+      return { kind: "frame", dataUrl: canvas.toDataURL("image/jpeg", 0.92), sourceUrl: location.href };
     } catch (err) {
-      console.warn("[Social Detect] Canvas frame capture failed (likely CORS):", err);
+      console.warn("[Social Detect] YouTube canvas capture failed:", err);
       return null;
     }
   }
@@ -155,13 +145,8 @@
       const canvas = document.createElement("canvas");
       canvas.width = sw;
       canvas.height = sh;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-      return {
-        kind: "frame",
-        dataUrl: canvas.toDataURL("image/jpeg", 0.92),
-        sourceUrl: location.href,
-      };
+      canvas.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+      return { kind: "frame", dataUrl: canvas.toDataURL("image/jpeg", 0.92), sourceUrl: location.href };
     } catch (err) {
       console.warn("[Social Detect] Viewport crop failed:", err);
       return null;
@@ -182,27 +167,32 @@
       if (src && !src.startsWith("blob:") && !src.startsWith("mediasource:")) {
         return { kind: "url", mediaType: "video", url: src };
       }
-
-      // 1) Same path as Instagram: canvas snapshot of the <video>
-      const frame = captureVideoFrame(mediaEl);
-      if (frame) return frame;
-
-      // 2) YouTube CORS often blocks canvas — screenshot + crop instead
-      return captureViewportFrame(mediaEl);
+      // Instagram-style frame capture first, then screenshot fallback for CORS.
+      return captureVideoFrame(mediaEl) || captureViewportFrame(mediaEl);
     }
 
     return null;
   }
 
-  if (window.SocialDetectCore) {
-    window.SocialDetectCore.start({
-      name: "youtube",
-      postSelector: "#movie_player, ytd-player, ytd-reel-video-renderer",
-      getPostElements,
-      findMediaElement,
-      shouldShowControl,
-      extractMedia,
-      navigationEvents: ["yt-navigate-finish", "yt-page-data-updated"],
-    });
+  const adapter = {
+    name: "youtube",
+    postSelector: "#movie_player, ytd-player, ytd-reel-video-renderer, video.html5-main-video",
+    getPostElements,
+    findMediaElement,
+    shouldShowControl,
+    extractMedia,
+    navigationEvents: ["yt-navigate-finish", "yt-page-data-updated"],
+  };
+
+  function boot() {
+    if (!window.SocialDetectCore) {
+      console.warn("[Social Detect] core not ready yet, retrying…");
+      setTimeout(boot, 200);
+      return;
+    }
+    window.SocialDetectCore.start(adapter);
+    console.info("[Social Detect] YouTube adapter ready");
   }
+
+  boot();
 })();

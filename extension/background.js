@@ -2,26 +2,15 @@
  * Background service worker.
  *
  * Content scripts never call the backend directly -- they send a message
- * here instead. This keeps backend-URL configuration, auth headers (future),
- * and CORS/host-permission concerns in one place, and means the popup and
- * every content script share identical request logic.
- *
- * Message contract (all messages are { type, ...payload }):
- *   ANALYZE_URL        { url, platform }        -> POSTs to /analyze/url
- *   ANALYZE_DATA_URL    { dataUrl, mediaKind, sourceUrl, platform }
- *                                                -> decodes a data: URL
- *                                                   (captured video frame or
- *                                                   recorded clip) and POSTs
- *                                                   multipart to
- *                                                   /analyze/image|/video|/media
- *   ANALYZE_FRAMES      { frames[], timestamps?, sourceUrl, platform }
- *                                                -> POSTs JPEG frames to
- *                                                   /analyze/frames (visual
- *                                                   pipeline; no audio)
- *   GET_STATUS          {}                       -> GET /status
+ * here instead. This also actively injects the YouTube adapter into YouTube
+ * tabs, because YouTube's SPA soft-navigation often skips declarative
+ * content_script reinjection (Instagram full page loads do not have this issue).
  */
 
 import { getSettings } from "./utils/config.js";
+
+const YT_HOST_RE = /^https?:\/\/([a-z0-9-]+\.)?(youtube\.com|youtu\.be)\//i;
+const IG_HOST_RE = /^https?:\/\/([a-z0-9-]+\.)?instagram\.com\//i;
 
 async function analyzeUrl(url, platform) {
   const { backendUrl } = await getSettings();
@@ -107,7 +96,70 @@ async function finish(resp) {
   return { ok: true, data: body };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+async function injectPlatform(tabId, platform) {
+  const files =
+    platform === "youtube"
+      ? ["content_scripts/core.js", "content_scripts/platforms/youtube.js"]
+      : ["content_scripts/core.js", "content_scripts/platforms/instagram.js"];
+
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId, allFrames: false },
+      files,
+    });
+    return { ok: true, platform };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err), platform };
+  }
+}
+
+function platformForUrl(url) {
+  if (!url) return null;
+  if (YT_HOST_RE.test(url)) return "youtube";
+  if (IG_HOST_RE.test(url)) return "instagram";
+  return null;
+}
+
+async function maybeInject(tabId, url, reason) {
+  const platform = platformForUrl(url);
+  if (!platform) return;
+  const result = await injectPlatform(tabId, platform);
+  if (!result.ok) {
+    console.warn(`[Social Detect] inject (${reason}) failed:`, result.error);
+  } else {
+    console.info(`[Social Detect] injected ${platform} into tab ${tabId} (${reason})`);
+  }
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Inject on load complete and when the URL changes (YouTube SPA).
+  if (changeInfo.status === "complete" || changeInfo.url) {
+    const url = changeInfo.url || tab.url;
+    maybeInject(tabId, url, changeInfo.url ? "url-change" : "complete");
+  }
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
+  // Re-inject into already-open YouTube/Instagram tabs after install/update.
+  try {
+    const tabs = await chrome.tabs.query({
+      url: [
+        "*://*.youtube.com/*",
+        "*://youtube.com/*",
+        "*://youtu.be/*",
+        "*://*.instagram.com/*",
+        "*://instagram.com/*",
+      ],
+    });
+    for (const tab of tabs) {
+      if (tab.id != null) await maybeInject(tab.id, tab.url, "onInstalled");
+    }
+  } catch (err) {
+    console.warn("[Social Detect] onInstalled inject failed:", err);
+  }
+});
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
       switch (message.type) {
@@ -131,6 +183,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case "GET_STATUS":
           sendResponse(await getStatus());
           break;
+        case "INJECT_ACTIVE_TAB": {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (!tab?.id) {
+            sendResponse({ ok: false, error: "No active tab" });
+            break;
+          }
+          const platform = message.platform || platformForUrl(tab.url) || "youtube";
+          sendResponse(await injectPlatform(tab.id, platform));
+          break;
+        }
+        case "PING_ACTIVE_TAB": {
+          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (!tab?.id) {
+            sendResponse({ ok: false, error: "No active tab" });
+            break;
+          }
+          try {
+            const resp = await chrome.tabs.sendMessage(tab.id, { type: "SD_PING" });
+            sendResponse({ ok: true, tabUrl: tab.url, ping: resp });
+          } catch (err) {
+            sendResponse({ ok: false, tabUrl: tab.url, error: err?.message || String(err) });
+          }
+          break;
+        }
         default:
           sendResponse({ ok: false, error: `Unknown message type: ${message.type}` });
       }
@@ -138,5 +214,5 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       sendResponse({ ok: false, error: err?.message || String(err) });
     }
   })();
-  return true; // keep the message channel open for the async response
+  return true;
 });
