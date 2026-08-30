@@ -10,6 +10,7 @@ const CATEGORY_LABELS = {
   semantic: "Semantic model",
   temporal_inconsistency: "Temporal consistency",
   face_artifact: "Face artifact",
+  audio_artifact: "Audio authenticity",
 };
 
 function severityColor(score) {
@@ -23,9 +24,12 @@ export default function EvidenceList({ evidence }) {
     return <p className="text-sm text-slate400">No specific evidence signals were returned.</p>;
   }
 
+  const visible = evidence.filter((e) => e.detector === "image_branch_cifake");
+  const rows = visible.length ? visible : evidence;
+
   return (
     <ul className="space-y-2">
-      {evidence.map((e, i) => (
+      {rows.map((e, i) => (
         <li
           key={i}
           className={`border rounded-md px-3 py-2.5 text-sm flex gap-3 items-start ${severityColor(e.score)}`}

@@ -1,0 +1,12 @@
+# Used when building the training image from the repository root.
+.git/
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/node_modules/
+dashboard/
+extension/
+backend/
+training/data/
+training/exports/
+*.pth

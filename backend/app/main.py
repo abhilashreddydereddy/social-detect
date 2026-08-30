@@ -16,6 +16,20 @@ logging.basicConfig(level=logging.INFO)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    # Load CIFake (and any other learned checkpoint) so the first dashboard /
+    # extension request is not a 20–30s cold start.
+    try:
+        import asyncio
+        from app.detectors.registry import IMAGE_DETECTORS
+
+        def _warm() -> None:
+            for detector in IMAGE_DETECTORS:
+                if getattr(detector, "learned", False) and detector.available:
+                    detector.ensure_loaded()
+
+        await asyncio.get_running_loop().run_in_executor(None, _warm)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("social_detect").warning("Learned-detector warmup skipped", exc_info=True)
     yield
 
 

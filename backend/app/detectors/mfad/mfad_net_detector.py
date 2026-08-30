@@ -25,6 +25,7 @@ if str(_REPO_ROOT) not in sys.path:
 class MFADNetDetector(BaseDetector):
     name = "mfad_net"
     default_weight = 0.9
+    learned = True
     supports_image = True
     supports_video = True
     supports_audio = True
@@ -34,7 +35,6 @@ class MFADNetDetector(BaseDetector):
         self._checkpoint_path = (
             checkpoint_path
             or getattr(settings, "mfad_net_checkpoint_path", None)
-            or settings.image_model_checkpoint_path
             or str(_REPO_ROOT / "backend" / "models" / "mfad_net" / "mfad_net_best.pth")
         )
         self._model = None

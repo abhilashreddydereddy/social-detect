@@ -21,8 +21,10 @@ async function refreshStatus(backendUrl) {
     if (!resp.ok) throw new Error("bad response");
     const data = await resp.json();
     const active = data.detectors.filter((d) => d.available).length;
-    statusBadge.textContent = `${active}/${data.detectors.length} detectors online`;
-    statusDot.className = "dot ok";
+    const cifake = data.detectors.find((d) => d.name === "image_branch_cifake");
+    const modelBit = cifake?.available ? "CIFake online" : "heuristics only";
+    statusBadge.textContent = `${modelBit} · ${active}/${data.detectors.length}`;
+    statusDot.className = cifake?.available ? "dot ok" : "dot";
   } catch (err) {
     statusBadge.textContent = "backend unreachable";
     statusDot.className = "dot error";

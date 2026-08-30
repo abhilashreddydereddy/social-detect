@@ -1,0 +1,12 @@
+# Dev overlay: hot-reload via bind mounts (does not replace the default stack).
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+services:
+  backend:
+    volumes:
+      - ./backend/app:/app/app
+      - ./backend/models:/app/models
+
+  dashboard:
+    volumes:
+      - ./dashboard:/app
+      - /app/node_modules

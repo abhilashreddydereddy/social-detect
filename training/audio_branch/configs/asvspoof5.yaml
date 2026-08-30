@@ -1,0 +1,16 @@
+name: asvspoof5-audio
+train_manifest: training/data/manifests/asvspoof5_train.csv
+val_manifest: training/data/manifests/asvspoof5_val.csv
+output_dir: training/exports/audio_branch/asvspoof5
+checkpoint_name: asvspoof5_best.pth
+device: cuda
+sample_rate: 16000
+clip_seconds: 4.0
+n_fft: 512
+hop_length: 160
+n_mels: 80
+batch_size: 32
+num_workers: 2
+epochs: 15
+learning_rate: 0.001
+weight_decay: 0.0001

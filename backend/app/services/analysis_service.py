@@ -48,7 +48,13 @@ async def analyze_image_bytes(raw: bytes, source: str, platform: str = "unknown"
         classification=classification,
         evidence=evidence,
         detector_results=results,
-        metadata={"width": image.shape[1], "height": image.shape[0], "platform": platform, "input_kind": "image"},
+        metadata={
+            "width": image.shape[1],
+            "height": image.shape[0],
+            "platform": platform,
+            "input_kind": "image",
+            **_learned_model_meta(results),
+        },
         processing_time_ms=elapsed_ms,
     )
 
@@ -122,6 +128,7 @@ async def analyze_video_bytes(raw: bytes, source: str, platform: str = "unknown"
             "sampled_frames": len(frames),
             "audio_analyzed": bool(audio_result.available and audio_result.error is None),
             "pipeline": "frames_as_images+audio_parallel",
+            **_learned_model_meta(all_results),
         },
         processing_time_ms=elapsed_ms,
     )
@@ -196,6 +203,7 @@ async def analyze_frame_sequence(
             "sampled_frames": len(frames),
             "audio_analyzed": False,
             "pipeline": "frames_as_images",
+            **_learned_model_meta(all_results),
         },
         processing_time_ms=elapsed_ms,
     )
@@ -233,7 +241,15 @@ def _run_visual_detectors(
         # Per-frame detectors: treat sampled frames as images.
         frame_results = detector.analyze_video_frames(frames, timestamps)
         all_results.extend(frame_results)
-        if len(frame_results) == len(frames):
+        if (
+            len(frame_results) == 1
+            and frame_results[0].error is None
+            and frame_results[0].frame_scores
+            and len(frame_results[0].frame_scores) == len(frames)
+        ):
+            for i, score in enumerate(frame_results[0].frame_scores):
+                per_frame_probs[i].append(score)
+        elif len(frame_results) == len(frames):
             for i, fr in enumerate(frame_results):
                 if fr.error is None:
                     per_frame_probs[i].append(fr.ai_probability)
@@ -295,6 +311,20 @@ def _run_audio_detectors(
         )
 
     return {"results": results, "audio_result": audio_result}
+
+
+def _learned_model_meta(results: List[DetectorResult]) -> dict:
+    """Surface the checkpoint-backed scorer so dashboard/extension can label it."""
+    order = ("image_branch_cifake", "mfad_net")
+    by_name = {r.detector: r for r in results if r.error is None}
+    for name in order:
+        hit = by_name.get(name)
+        if hit is not None:
+            return {
+                "primary_model": name,
+                "primary_model_ai_probability": round(hit.ai_probability, 4),
+            }
+    return {"primary_model": None}
 
 
 async def _persist(response: AnalysisResponse, platform: str) -> None:

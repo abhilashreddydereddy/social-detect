@@ -46,6 +46,7 @@ class DetectorResult(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
     evidence: List[Evidence] = []
     error: Optional[str] = None  # populated if the detector failed/was unavailable, never raises
+    frame_scores: Optional[List[float]] = None  # optional per-frame P(AI) for video timelines
 
 
 class Classification(str, Enum):

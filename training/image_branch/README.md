@@ -1,26 +1,43 @@
 # Image Branch
 
-This branch should produce a learned `p(fake)` score for a single image.
+Learned `p(fake)` for a **single image**. Trained primarily on **CIFake**;
+videos reuse this model by sampling frames and aggregating scores.
 
-Recommended starting point:
+## Train (CIFake)
 
-- integrate or mirror the GRIP-UNINA CLIP-based detector
-- evaluate on a held-out social-media validation set
+1. Place or import data — see [`training/data/cifake/README.md`](../data/cifake/README.md).
+2. Build manifests (if not using `from-tree`).
+3. Train:
+
+```powershell
+pip install -r training/requirements.txt
+python -m training.image_branch.scripts.train --config training/image_branch/configs/cifake.yaml
+```
+
+4. Export:
+
+```powershell
+Copy-Item training\exports\image_branch\cifake\best_model.pth backend\models\image_branch\cifake_best.pth
+```
 
 ## Outputs
 
-- checkpoint: `best_model.pth`
-- validation predictions: `val_predictions.csv`
+- `training/exports/image_branch/cifake/best_model.pth`
+- `history.json`
+- `val_predictions.csv`
 
-## Training goal
+## Model
 
-Train or fine-tune a branch that generalizes across:
+Default: EfficientNet-B0 (timm) + optional FFT frequency branch
+(`training/image_branch/models/image_classifier.py`). Swap to `efficientnet_b4`
+or `tiny_cnn` in `configs/cifake.yaml`.
 
-- clean synthetic images
-- recompressed social-media images
-- screenshots
-- reposted / cropped images
+## Backend
 
-## Next step
+Detector name: `image_branch_cifake`  
+Registered for both image and video. Reports unavailable until a checkpoint exists.
 
-Start by creating a manifest CSV and a config file under `configs/`.
+## Related branches
+
+- **Video temporal** (optional later): `training/video_branch/` — adds temporal modeling on top of frame scoring
+- **Audio** (separate): `training/audio_branch/` — not trained on CIFake

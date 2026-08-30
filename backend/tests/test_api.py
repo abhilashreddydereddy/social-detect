@@ -77,6 +77,7 @@ def test_status():
     assert len(data["detectors"]) > 0
     assert any(d["name"] == "social_multimodal_ensemble" for d in data["detectors"])
     assert any(d["name"] == "synthetic_speech_audio" for d in data["detectors"])
+    assert any(d["name"] == "image_branch_cifake" for d in data["detectors"])
 
 
 def test_analyze_image_returns_probabilistic_fields():

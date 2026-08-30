@@ -22,7 +22,7 @@ async function analyzeUrl(url, platform) {
   return finish(resp);
 }
 
-async function analyzeDataUrl(dataUrl, mediaKind, sourceUrl) {
+async function analyzeDataUrl(dataUrl, mediaKind, sourceUrl, platform) {
   const { backendUrl } = await getSettings();
   const blob = await (await fetch(dataUrl)).blob();
   const form = new FormData();
@@ -46,10 +46,14 @@ async function analyzeDataUrl(dataUrl, mediaKind, sourceUrl) {
     : new Blob([blob], { type: mediaKind === "video" ? "video/webm" : "image/jpeg" });
 
   form.append("file", typedBlob, filename);
+  if (platform) {
+    form.append("platform", platform);
+  }
   console.info("[Social Detect] POST", `${backendUrl}${endpoint}`, {
     bytes: typedBlob.size,
     type: typedBlob.type,
     filename,
+    platform: platform || null,
   });
   const resp = await fetch(`${backendUrl}${endpoint}`, { method: "POST", body: form });
   return finish(resp);
@@ -188,7 +192,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse(await analyzeUrl(message.url, message.platform));
           break;
         case "ANALYZE_DATA_URL":
-          sendResponse(await analyzeDataUrl(message.dataUrl, message.mediaKind, message.sourceUrl));
+          sendResponse(await analyzeDataUrl(message.dataUrl, message.mediaKind, message.sourceUrl, message.platform));
           break;
         case "ANALYZE_FRAMES":
           sendResponse(await analyzeFrames(

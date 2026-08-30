@@ -21,5 +21,11 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Checkpoints are copied locally after training; do not commit weights.
+backend/models/**/*.pth
+
 # Regenerable MFAD-Net synthetic crops (recreate via prepare_synthetic / smoke train)
 training/data/mfad_net/processed/
+training/data/cifake_smoke/
+training/data/manifests/cifake_smoke_*.csv
+training/exports/image_branch/cifake_smoke/

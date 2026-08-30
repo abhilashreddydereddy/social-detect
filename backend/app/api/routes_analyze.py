@@ -23,32 +23,45 @@ def _check_size(raw: bytes) -> None:
 
 
 @router.post("/image", response_model=AnalysisResponse)
-async def analyze_image(file: UploadFile = File(...)):
+async def analyze_image(
+    file: UploadFile = File(...),
+    platform: str | None = Form(default=None),
+):
     if file.content_type and file.content_type not in IMAGE_CONTENT_TYPES and not file.content_type.startswith("image/"):
         # Still allow if magic bytes say image (handled by /media); keep strict here.
         raise HTTPException(status_code=415, detail=f"Unsupported content type: {file.content_type}")
     raw = await file.read()
     _check_size(raw)
     try:
-        return await analysis_service.analyze_image_bytes(raw, source="upload")
+        return await analysis_service.analyze_image_bytes(
+            raw, source="upload", platform=platform or "unknown",
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not process image: {exc}") from exc
 
 
 @router.post("/video", response_model=AnalysisResponse)
-async def analyze_video(file: UploadFile = File(...)):
+async def analyze_video(
+    file: UploadFile = File(...),
+    platform: str | None = Form(default=None),
+):
     if file.content_type and file.content_type not in VIDEO_CONTENT_TYPES and not file.content_type.startswith("video/"):
         raise HTTPException(status_code=415, detail=f"Unsupported content type: {file.content_type}")
     raw = await file.read()
     _check_size(raw)
     try:
-        return await analysis_service.analyze_video_bytes(raw, source="upload")
+        return await analysis_service.analyze_video_bytes(
+            raw, source="upload", platform=platform or "unknown",
+        )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Could not process video: {exc}") from exc
 
 
 @router.post("/media", response_model=AnalysisResponse)
-async def analyze_media(file: UploadFile = File(...)):
+async def analyze_media(
+    file: UploadFile = File(...),
+    platform: str | None = Form(default=None),
+):
     """Auto-detect whether the upload is an image or a video, then process accordingly.
 
     Videos are cut into frames (analyzed as images + temporal cues) while the
@@ -60,6 +73,7 @@ async def analyze_media(file: UploadFile = File(...)):
         return await analysis_service.analyze_media_bytes(
             raw,
             source="upload",
+            platform=platform or "unknown",
             content_type=file.content_type,
             filename=file.filename,
         )

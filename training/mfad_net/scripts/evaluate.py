@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from pathlib import Path
@@ -27,6 +28,7 @@ def main() -> None:
     parser.add_argument("--config", default="training/mfad_net/configs/smoke.yaml")
     parser.add_argument("--checkpoint", default="training/exports/mfad_net/mfad_net_best.pth")
     parser.add_argument("--split", default="test", choices=["train", "val", "test"])
+    parser.add_argument("--write-predictions", action="store_true")
     args = parser.parse_args()
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -58,27 +60,69 @@ def main() -> None:
 
     correct = 0
     total = 0
+    true_negative = 0
+    false_positive = 0
+    false_negative = 0
+    true_positive = 0
     probs, labels = [], []
+    prediction_rows: list[dict[str, object]] = []
     for batch in loader:
         out = model(batch["frames"].to(device), batch["wav"].to(device), batch["meta"].to(device))
         pred = out["logits"].argmax(dim=-1)
         y = batch["label"].to(device)
         correct += int((pred == y).sum().item())
         total += y.size(0)
-        probs.extend(out["p_fake"].cpu().tolist())
-        labels.extend(y.cpu().tolist())
+        true_negative += int(((pred == 0) & (y == 0)).sum().item())
+        false_positive += int(((pred == 1) & (y == 0)).sum().item())
+        false_negative += int(((pred == 0) & (y == 1)).sum().item())
+        true_positive += int(((pred == 1) & (y == 1)).sum().item())
+        p_fake = out["p_fake"].cpu().tolist()
+        label_list = y.cpu().tolist()
+        pred_list = pred.cpu().tolist()
+        probs.extend(p_fake)
+        labels.extend(label_list)
+        if args.write_predictions:
+            for sample_id, label, prob, pred_label in zip(
+                batch["sample_id"], label_list, p_fake, pred_list,
+            ):
+                prediction_rows.append(
+                    {
+                        "sample_id": sample_id,
+                        "label": label,
+                        "p_fake": prob,
+                        "pred": pred_label,
+                    }
+                )
 
+    precision = true_positive / max(true_positive + false_positive, 1)
+    recall = true_positive / max(true_positive + false_negative, 1)
+    f1 = 2 * precision * recall / max(precision + recall, 1e-12)
     metrics = {
         "split": args.split,
         "n": total,
         "accuracy": correct / max(total, 1),
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
         "auc": _auc(labels, probs),
+        "confusion_matrix": {
+            "tn": true_negative,
+            "fp": false_positive,
+            "fn": false_negative,
+            "tp": true_positive,
+        },
         "checkpoint": str(args.checkpoint),
     }
     print(json.dumps(metrics, indent=2))
     out_path = Path(config.get("output_dir", "training/exports/mfad_net")) / f"eval_{args.split}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    if args.write_predictions:
+        pred_path = out_path.parent / f"eval_{args.split}_predictions.csv"
+        with pred_path.open("w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=["sample_id", "label", "p_fake", "pred"])
+            writer.writeheader()
+            writer.writerows(prediction_rows)
 
 
 if __name__ == "__main__":

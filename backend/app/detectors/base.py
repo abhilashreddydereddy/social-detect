@@ -35,6 +35,10 @@ class BaseDetector(abc.ABC):
     #: quality; heuristic detectors are weighted lower than trained classifiers.
     default_weight: float = 0.5
 
+    #: True for checkpoint-backed models. When any learned detector succeeds,
+    #: fusion down-weights heuristics so they explain rather than override.
+    learned: bool = False
+
     #: Which media types this detector supports.
     supports_image: bool = True
     supports_video: bool = False

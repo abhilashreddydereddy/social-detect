@@ -1,0 +1,28 @@
+name: cifake-image-branch
+train_manifest: training/data/manifests/cifake_train.csv
+val_manifest: training/data/manifests/cifake_val.csv
+output_dir: training/exports/image_branch/cifake
+checkpoint_name: best_model.pth
+
+# Model
+backbone: efficientnet_b0 # efficientnet_b0 | efficientnet_b4 | tiny_cnn
+pretrained: true
+use_fft: true
+fft_dim: 256
+dropout: 0.2
+
+# Training
+device: cuda # auto | cpu | cuda
+batch_size: 64
+num_workers: 4
+prefetch_factor: 2
+epochs: 12
+learning_rate: 0.0001
+weight_decay: 0.0001
+early_stopping_patience: 3
+seed: 42
+image_size: 224 # upsample CIFake 32x32 / downscale larger stills
+jpeg_aug: true
+filter_aug: true
+label_column: label
+path_column: path

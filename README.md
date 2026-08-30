@@ -175,7 +175,7 @@ sent to the server (they are usually blocked).
 3. Enable **Developer mode**.
 4. Click **Load unpacked**.
 5. Select the `social-detect/extension` folder (the folder that contains `manifest.json`).
-6. Confirm the extension version in the card (current: **0.3.0**).
+6. Confirm the extension version in the card (current: **0.3.2**).
 7. Click the extension icon → Backend URL = `http://localhost:8000` → detectors should show online.
 8. Open Instagram or a YouTube `/watch` / Shorts page → click **🔍 Analyze** on the media.
 
@@ -248,6 +248,16 @@ Restart the backend after copying weights. Full-dataset training (FF++ / DFDC / 
 
 > The committed / smoke checkpoint validates the architecture. For real deepfake accuracy, train on the paper datasets with `full.yaml` on GPU.
 
+#### Image branch (CIFake) — primary still / video-frame model
+
+```powershell
+python -m training.image_branch.scripts.prepare_manifest from-tree --root path\to\CIFAKE
+python -m training.image_branch.scripts.train --config training/image_branch/configs/cifake.yaml
+Copy-Item training\exports\image_branch\cifake\best_model.pth backend\models\image_branch\cifake_best.pth
+```
+
+Image uploads use this checkpoint; video uploads sample frames and score them with the same model. See `training/image_branch/README.md`.
+
 ---
 
 ### 7. Optional — Docker
@@ -298,8 +308,9 @@ probabilistic estimate, not proof. Labels are hedged (`Likely AI Generated`,
 Heuristic (no weights required): frequency FFT, noise residual, compression ELA,
 metadata, temporal consistency, synthetic speech audio.
 
-Learned / optional: `mfad_net` (loads `backend/models/mfad_net/mfad_net_best.pth`
-when present), `clip_semantic_probe`.
+Learned: `image_branch_cifake` (loads `backend/models/image_branch/cifake_best.pth`
+or the training export path) is the primary still/video-frame scorer after CIFake
+training. Optional: `mfad_net`, `clip_semantic_probe`.
 
 Add a model: implement `BaseDetector`, register in `app/detectors/registry.py`.
 

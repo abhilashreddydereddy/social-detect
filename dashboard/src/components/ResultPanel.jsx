@@ -15,6 +15,9 @@ export default function ResultPanel({ result }) {
 
   const caseId = result.request_id.split("-")[0];
   const classStyle = CLASSIFICATION_STYLE[result.classification] || CLASSIFICATION_STYLE.Inconclusive;
+  const primaryModel = result.metadata?.primary_model;
+  const primaryProb = result.metadata?.primary_model_ai_probability;
+  const LEARNED = new Set(["image_branch_cifake", "mfad_net"]);
 
   return (
     <div className="relative bg-ink-900 border border-ink-700 rounded-b-lg rounded-t-sm shadow-xl">
@@ -32,6 +35,17 @@ export default function ResultPanel({ result }) {
           {Math.round(result.confidence * 100)}% confidence
         </span>
       </div>
+
+      {primaryModel && (
+        <div className="px-6 py-3 border-b border-ink-700 font-mono text-xs text-signal-cyan flex justify-between gap-4">
+          <span>
+            Primary model: {primaryModel === "image_branch_cifake" ? "CIFake image classifier" : primaryModel}
+          </span>
+          {primaryProb != null && (
+            <span>{Math.round(primaryProb * 100)}% P(AI)</span>
+          )}
+        </div>
+      )}
 
       <div className="p-6 border-b border-ink-700">
         <div className="flex items-baseline justify-between mb-2">
@@ -105,7 +119,12 @@ export default function ResultPanel({ result }) {
             <tbody>
               {result.detector_results.map((d, i) => (
                 <tr key={i} className="border-t border-ink-800">
-                  <td className="py-2 pr-3">{d.detector}</td>
+                  <td className="py-2 pr-3">
+                    {d.detector}
+                    {LEARNED.has(d.detector) && !d.error && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-signal-cyan">learned</span>
+                    )}
+                  </td>
                   <td className="py-2 pr-3">
                     {d.error ? "—" : `${Math.round(d.ai_probability * 100)}%`}
                   </td>

@@ -40,7 +40,7 @@ class MultimodalEnsembleDetector(BaseDetector):
     """
 
     name = "social_multimodal_ensemble"
-    default_weight = 0.95
+    default_weight = 0.3
     supports_image = True
     supports_video = True
 
