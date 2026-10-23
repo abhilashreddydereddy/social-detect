@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     fusion_model_path: str | None = None
     mfad_net_checkpoint_path: str | None = None
     asvspoof5_audio_checkpoint_path: str | None = None
+    # WeDefense deploys a detector as a pair of TorchScript modules: a raw
+    # waveform frontend and a backend/projection classifier.  Leave unset to
+    # keep this optional detector disabled.
+    wedefense_audio_frontend_path: str | None = None
+    wedefense_audio_backend_path: str | None = None
+    wedefense_audio_spoof_class_index: int = 1
+    wedefense_audio_window_seconds: float = 12.0
+    wedefense_audio_hop_seconds: float = 6.0
 
 
 settings = Settings()

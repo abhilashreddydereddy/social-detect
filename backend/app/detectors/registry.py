@@ -19,6 +19,7 @@ from typing import List
 
 from app.detectors.audio.synthetic_speech_detector import SyntheticSpeechDetector
 from app.detectors.audio.asvspoof5_detector import ASVSpoof5Detector
+from app.detectors.audio.wedefense_detector import WeDefenseAudioDetector
 from app.detectors.base import BaseDetector
 from app.detectors.image.frequency_artifact_detector import FrequencyArtifactDetector
 from app.detectors.image.noise_residual_detector import NoiseResidualDetector
@@ -57,6 +58,7 @@ VIDEO_DETECTORS: List[BaseDetector] = [
 ]
 
 AUDIO_DETECTORS: List[BaseDetector] = [
+    WeDefenseAudioDetector(),
     ASVSpoof5Detector(),
     SyntheticSpeechDetector(),
 ]

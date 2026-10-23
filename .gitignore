@@ -23,6 +23,8 @@ Thumbs.db
 
 # Checkpoints are copied locally after training; do not commit weights.
 backend/models/**/*.pth
+backend/models/**/*.pt
+backend/models/**/*.zip
 
 # Training datasets are local-only. Keep just the setup notes in version control.
 training/data/**
