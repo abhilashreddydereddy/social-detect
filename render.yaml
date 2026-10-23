@@ -5,8 +5,8 @@ services:
     plan: free
     region: oregon
     rootDir: backend
-    dockerfilePath: ./Dockerfile.render
-    dockerContext: .
+    dockerfilePath: ./backend/Dockerfile.render
+    dockerContext: ./backend
     healthCheckPath: /status
     envVars:
       - key: SOCIAL_DETECT_ENVIRONMENT
@@ -18,8 +18,8 @@ services:
     plan: free
     region: oregon
     rootDir: dashboard
-    dockerfilePath: ./Dockerfile.render
-    dockerContext: .
+    dockerfilePath: ./dashboard/Dockerfile.render
+    dockerContext: ./dashboard
     envVars:
       - key: API_HOST
         fromService:
