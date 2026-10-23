@@ -24,6 +24,10 @@ Thumbs.db
 # Checkpoints are copied locally after training; do not commit weights.
 backend/models/**/*.pth
 
+# Training datasets are local-only. Keep just the setup notes in version control.
+training/data/**
+!training/data/README.md
+
 # Regenerable MFAD-Net synthetic crops (recreate via prepare_synthetic / smoke train)
 training/data/mfad_net/processed/
 training/data/cifake_smoke/
