@@ -273,6 +273,35 @@ docker compose up --build
 
 ---
 
+### 8. Deploy with Docker on Render
+
+The repository includes a Render Blueprint at `render.yaml`. It deploys the
+API and dashboard as separate Docker web services; the dashboard proxies API
+requests to the backend, so its URL is the only one needed to use the web UI.
+
+1. Push this repository to GitHub.
+2. In Render, choose **New → Blueprint**, connect the repository, and deploy
+   the detected `render.yaml`.
+3. Open the `social-detect-dashboard` service URL when both services finish
+   deploying. Check the API at the `social-detect-api` service URL followed
+   by `/status`.
+
+The Blueprint uses Render's free web-service plan in Oregon. Free services
+can spin down when idle, so the first request after inactivity may be slow.
+This starter deploy uses the lightweight, CPU-only detector dependencies;
+trained checkpoints and PostgreSQL are not included. Database history is
+best-effort and is not persistent in this setup. Add a paid Render Postgres
+database and set `SOCIAL_DETECT_DATABASE_URL` if you need persisted analysis
+records. Add trained model checkpoints separately if you want learned
+detectors enabled.
+
+To connect the browser extension, set its Backend URL to the API service URL
+in the extension popup. Also add that exact `https://<api-service>.onrender.com/*`
+origin to `host_permissions` in `extension/manifest.json`, then reload the
+unpacked extension. Do not use a broad wildcard for all Render domains.
+
+---
+
 ## Repository layout
 
 ```
