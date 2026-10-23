@@ -53,8 +53,7 @@ services:
   dashboard:
     build:
       context: ./dashboard
-      args:
-        VITE_API_BASE_URL: http://localhost:8000
+      target: dev
     restart: unless-stopped
     depends_on:
       - backend

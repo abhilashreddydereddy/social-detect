@@ -300,6 +300,12 @@ in the extension popup. Also add that exact `https://<api-service>.onrender.com/
 origin to `host_permissions` in `extension/manifest.json`, then reload the
 unpacked extension. Do not use a broad wildcard for all Render domains.
 
+When creating the services manually instead of using the Blueprint, set the
+API service root directory to `backend` and the dashboard service root
+directory to `dashboard`. For both services, use `Dockerfile` as the Dockerfile
+path. The dashboard production image uses the `production` target by default;
+the local Compose setup uses its `dev` target.
+
 ---
 
 ## Repository layout

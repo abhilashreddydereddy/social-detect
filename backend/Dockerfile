@@ -1,6 +1,3 @@
-# Multi-stage-friendly single stage; swap the base image for a CUDA runtime
-# image (e.g. nvidia/cuda:12.4.1-runtime-ubuntu22.04 + system Python) if you
-# need GPU inference in the container. CPU-only works out of the box.
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -17,10 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-COPY requirements.txt .
-# For a lighter CPU-only image without the heavy optional ML stack, swap in
-# requirements-lite.txt here.
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements-lite.txt .
+RUN pip install --no-cache-dir -r requirements-lite.txt
 
 COPY . .
 
